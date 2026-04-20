@@ -914,17 +914,33 @@ const EMPTY = {
 };
 const G = "#00c805";
 const R = "#ff5000";
+// 금액 표기: "$1,234.56" 대신 "1,234.56 USD" / "1,234 USD" 로 마지막 단위까지 정확 표시
+// (억/만 단위 축약 사용 안 함 — 원화도 "1,234,567 원" 풀 스트링)
 function fmt(n) {
-  if (Math.abs(n) >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
-  if (Math.abs(n) >= 1e3) return "$" + Math.round(n).toLocaleString("en-US");
-  return "$" + Math.abs(n).toFixed(2);
+  if (n === null || n === undefined || !isFinite(n)) return "0 USD";
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  // 1달러 미만은 소수점 2자리, 그 이상은 정수(콤마)로
+  if (abs < 1) return sign + abs.toFixed(2) + " USD";
+  return sign + Math.round(abs).toLocaleString("en-US") + " USD";
 }
 function fmtKRW(usd, rate) {
-  if (!rate) return null;
+  if (!rate || usd === null || usd === undefined || !isFinite(usd)) return null;
   const k = Math.round(usd * rate);
-  if (k >= 1e8) return "₩" + (k / 1e8).toFixed(1) + "억";
-  if (k >= 1e4) return "₩" + Math.round(k / 1e4).toLocaleString("ko-KR") + "만";
-  return "₩" + k.toLocaleString("ko-KR");
+  const sign = k < 0 ? "-" : "";
+  return sign + Math.abs(k).toLocaleString("ko-KR") + " 원";
+}
+// 주당 현재가처럼 소수점 2자리 필요한 금액용 ("1,234.56 USD")
+function fmtPrice(n) {
+  if (n === null || n === undefined || !isFinite(n)) return "— USD";
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+}
+// 주당 가격의 원화 환산 (소수점 없이 "1,234 원")
+function fmtPriceKRW(usd, rate) {
+  if (!rate || usd === null || usd === undefined || !isFinite(usd)) return null;
+  const k = Math.round(usd * rate);
+  const sign = k < 0 ? "-" : "";
+  return sign + Math.abs(k).toLocaleString("ko-KR") + " 원";
 }
 function pctFmt(v) {
   return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
@@ -1137,6 +1153,7 @@ function App() {
   const [aiQuery, setAiQuery] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [activeInvestor, setActiveInvestor] = useState(null);
   const [apiKeyInput, setApiKeyInputState] = useState(() => getApiKey());
   const [showApiKeyInput, setShowApiKeyInput] = useState(() => !getApiKey());
   const [apiKeySaved, setApiKeySaved] = useState(() => !!getApiKey());
@@ -1150,6 +1167,10 @@ function App() {
   // newsRange: 'today' | 'week' | 'month'
   const [newsRange, setNewsRange] = useState("today");
   const [expandedStock, setExpandedStock] = useState(null);
+  // 종목별 뉴스 갱신 상태 — 티커 → "loading" | "ok" | "error" | undefined
+  const [tickerNewsLoading, setTickerNewsLoading] = useState({});
+  const [tickerNewsRefreshed, setTickerNewsRefreshed] = useState({}); // 티커 → 마지막 갱신 시각(ms)
+  const [tickerNewsError, setTickerNewsError] = useState({}); // 티커 → 에러 메시지
   // ===== 투자노트(Investment Notes) 상태 =====
   // 저장 키: localStorage.investment_notes_v1
   //   { notes:[{id,date,type,ticker?,content}], principles:[{id,text,source:[noteIds],extractedAt}],
@@ -1347,7 +1368,7 @@ function App() {
       ctx.fillStyle = "#666";
       ctx.font = "11px -apple-system,sans-serif";
       ctx.textAlign = "right";
-      ctx.fillText(v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : "$" + (v / 1e3).toFixed(0) + "K", pad.left - 8, y + 4);
+      ctx.fillText(v >= 1e6 ? (v / 1e6).toFixed(1) + "M USD" : (v / 1e3).toFixed(0) + "K USD", pad.left - 8, y + 4);
     }
     ctx.setLineDash([6, 4]);
     ctx.strokeStyle = "rgba(255,255,255,0.3)";
@@ -1389,7 +1410,7 @@ function App() {
       ctx.fillStyle = p.hit ? G : "rgba(255,255,255,0.6)";
       ctx.font = "bold 10px -apple-system,sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(p.total >= 1e6 ? "$" + (p.total / 1e6).toFixed(1) + "M" : "$" + (p.total / 1e3).toFixed(0) + "K", xP(i), yP(p.total) - 10);
+      ctx.fillText(p.total >= 1e6 ? (p.total / 1e6).toFixed(1) + "M USD" : (p.total / 1e3).toFixed(0) + "K USD", xP(i), yP(p.total) - 10);
       ctx.fillStyle = "rgba(255,255,255,0.35)";
       ctx.font = "10px -apple-system,sans-serif";
       ctx.fillText(p.year, xP(i), H - 8);
@@ -1576,7 +1597,7 @@ JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 
     const ctx = portfolio.map(s => {
       const p = livePrices[s.ticker] ?? s.price;
       const v = p * s.shares;
-      return `${s.ticker}(${s.name}): ${s.shares}주 현재가 $${p.toFixed(2)} 평가 $${Math.round(v).toLocaleString()} 손익 ${((v - s.costBasis) / s.costBasis * 100).toFixed(1)}%`;
+      return `${s.ticker}(${s.name}): ${s.shares}주 현재가 ${p.toFixed(2)} USD 평가 ${Math.round(v).toLocaleString()} USD 손익 ${((v - s.costBasis) / s.costBasis * 100).toFixed(1)}%`;
     }).join("\n");
     // 최신 뉴스 요약 (stockNews + sectors) 을 컨텍스트에 주입
     const ND = (typeof window !== "undefined" && window.__NEWS_DATA) || {};
@@ -1585,11 +1606,39 @@ JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 
       if (!hi.length) return "";
       return `${tk} 주요뉴스: ` + hi.map(n => `[${n.date}] ${n.title}`).join(" / ");
     }).filter(Boolean).join("\n");
-    const systemPrompt = `당신은 하와이백억아빠의 전담 미국주식 투자비서입니다.
+    // 선택된 투자 대가가 있으면 해당 페르소나 철학을 주입
+    const investor = activeInvestor ? INVESTORS.find(i => i.key === activeInvestor) : null;
+    let systemPrompt;
+    let userMessage;
+    if (investor) {
+      systemPrompt = `${investor.philosophy}
+
+[하와이백억아빠 현재 포트폴리오 (${new Date().toLocaleDateString("ko-KR")})]
+${ctx}
+총평가: ${Math.round(totalValue).toLocaleString()} USD, 손익률: ${totalPnLPct >= 0 ? "+" : ""}${totalPnLPct.toFixed(1)}%
+목표: ${deadline}까지 ${fmt(goal)} (현재 ${((totalValue / goal) * 100).toFixed(1)}% 달성)
+
+[최신 주요 뉴스 (${ND.lastUpdated || "-"})]
+${newsCtx || "-"}
+
+[응답 규칙]
+1. 반드시 한국어로, ${investor.label}의 1인칭 관점("나는…", "내 기준으로는…")으로 작성
+2. 다음 구조를 반드시 지킬 것:
+   ■ 한 줄 결론: "진입 / 패스 / 관찰" 중 하나 + 신념도(낮음/중간/높음)
+   ■ 핵심 근거 3가지 (${investor.label}의 철학 프레임에 맞춰 — 각 1~2줄)
+   ■ 리스크 / 경계 포인트 2가지
+   ■ 적정 매수가 또는 목표가 (구체적 USD 수치로)
+   ■ 하와이백억아빠 포트폴리오 맥락에서의 비중 제안 (% 또는 비중 범위)
+3. 구체적 수치(매출 성장률, ROIC, PEG, TAM 등)를 ${investor.label}가 중시하는 지표 중심으로 인용
+4. 내 철학과 맞지 않으면 솔직하게 "내 스타일이 아니다"라고 말해라
+5. 600자 내외, 간결하게`;
+      userMessage = `다음 회사/티커를 위 투자 철학 관점에서 적합성을 평가해주세요: ${q}`;
+    } else {
+      systemPrompt = `당신은 하와이백억아빠의 전담 미국주식 투자비서입니다.
 
 [현재 포트폴리오 (${new Date().toLocaleDateString("ko-KR")})]
 ${ctx}
-총평가: $${Math.round(totalValue).toLocaleString()}, 손익률: ${totalPnLPct >= 0 ? "+" : ""}${totalPnLPct.toFixed(1)}%
+총평가: ${Math.round(totalValue).toLocaleString()} USD, 손익률: ${totalPnLPct >= 0 ? "+" : ""}${totalPnLPct.toFixed(1)}%
 목표: ${deadline}까지 ${fmt(goal)} (현재 ${((totalValue / goal) * 100).toFixed(1)}% 달성)
 
 [최신 주요 뉴스 (${ND.lastUpdated || "-"})]
@@ -1608,12 +1657,14 @@ ${newsCtx || "-"}
 4. 목표 도달 경로에 미치는 영향 1줄로 요약
 5. 투자 책임은 본인에게 있음을 마지막에 간단히 명시
 6. 500자 내외로 간결하게`;
+      userMessage = q;
+    }
     try {
       const data = await callClaude({
         model: "claude-sonnet-4-6",
         max_tokens: 1500,
         system: systemPrompt,
-        messages: [{ role: "user", content: q }]
+        messages: [{ role: "user", content: userMessage }]
       });
       setAiResponse(data.content?.map(c => c.text || "").join("") || "응답 오류");
     } catch (e) {
@@ -1629,7 +1680,7 @@ ${newsCtx || "-"}
     } finally {
       setAiLoading(false);
     }
-  }, [portfolio, totalValue, totalPnLPct, livePrices, goal, deadline]);
+  }, [portfolio, totalValue, totalPnLPct, livePrices, goal, deadline, activeInvestor]);
   const fetchZeroStocks = useCallback(async () => {
     setZeroLoading(true);
     setZeroError("");
@@ -1691,6 +1742,72 @@ ${newsCtx || "-"}
   }];
   const activeSectorRef = useRef(null);
   const sectorNewsRef = useRef(null);
+  // ===== 개별 종목 뉴스 실시간 갱신 =====
+  // Claude API로 해당 티커의 최신 30일 주요 뉴스를 받아와
+  // window.__NEWS_DATA.stockNews[ticker] 에 병합 (dedupe by title)
+  const refreshTickerNews = useCallback(async (ticker, companyName) => {
+    if (!ticker) return;
+    setTickerNewsLoading(prev => ({ ...prev, [ticker]: true }));
+    setTickerNewsError(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+    try {
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
+      const system = `당신은 미국 주식 실시간 뉴스 리서처입니다.
+- 반드시 유효한 JSON 배열만 반환 (설명/코드펜스 금지)
+- 최신 30일 (${todayStr} 기준) 이내 뉴스만
+- 중요도 구분: high (주가에 즉시 영향 — 실적·M&A·규제·대형 계약), medium (참고 — 신제품·파트너십·애널리스트 의견), low (일반)
+- date 는 YYYY-MM-DD 형식
+- 각 항목: { "date": "YYYY-MM-DD", "title": "...", "detail": "1~2문장 요약", "importance": "high|medium|low", "source": "Bloomberg|Reuters|WSJ|CNBC|..." }
+- 5~10건 반환`;
+      const user = `${ticker} (${companyName || ticker}) 의 최신 주요 뉴스를 JSON 배열로 주세요. ${todayStr} 기준 30일 이내. 한국어 요약.`;
+      const data = await callClaude({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system,
+        messages: [{ role: "user", content: user }]
+      });
+      const text = (data.content || []).map(c => c.text || "").join("");
+      // JSON 추출 (코드펜스가 혹시 포함되어도 허용)
+      let jsonStr = text.trim();
+      const fence = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (fence) jsonStr = fence[1].trim();
+      const arrStart = jsonStr.indexOf("[");
+      const arrEnd = jsonStr.lastIndexOf("]");
+      if (arrStart >= 0 && arrEnd > arrStart) jsonStr = jsonStr.slice(arrStart, arrEnd + 1);
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error("응답 형식 오류 (배열 아님)");
+      // 정규화
+      const normalized = parsed.map(n => ({
+        date: n.date || todayStr,
+        title: String(n.title || "").trim(),
+        detail: String(n.detail || "").trim(),
+        importance: ["high", "medium", "low"].includes(n.importance) ? n.importance : "medium",
+        source: String(n.source || "").trim()
+      })).filter(n => n.title);
+      if (!normalized.length) throw new Error("뉴스 항목 없음");
+      // 병합 (dedupe by title)
+      if (typeof window !== "undefined") {
+        window.__NEWS_DATA = window.__NEWS_DATA || { stockNews: {}, sectors: {}, lastUpdated: null };
+        window.__NEWS_DATA.stockNews = window.__NEWS_DATA.stockNews || {};
+        const existing = window.__NEWS_DATA.stockNews[ticker] || [];
+        const existingTitles = new Set(existing.map(n => (n.title || "").trim()));
+        const merged = [...normalized.filter(n => !existingTitles.has(n.title)), ...existing]
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .slice(0, 30); // 티커당 최근 30건 유지
+        window.__NEWS_DATA.stockNews[ticker] = merged;
+        window.__NEWS_DATA.lastUpdated = new Date().toISOString();
+      }
+      setTickerNewsRefreshed(prev => ({ ...prev, [ticker]: Date.now() }));
+    } catch (e) {
+      let msg = e.message || "오류";
+      if (e.code === "NO_API_KEY") msg = "API 키를 먼저 입력해주세요";
+      else if (e.code === "INVALID_KEY") msg = "API 키가 유효하지 않습니다";
+      else if (e.code === "RATE_LIMIT") msg = "호출 한도 초과 — 잠시 후 재시도";
+      setTickerNewsError(prev => ({ ...prev, [ticker]: msg }));
+    } finally {
+      setTickerNewsLoading(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+    }
+  }, []);
   const fetchSectorNews = useCallback(async sector => {
     if (activeSectorRef.current === sector.id && sectorNewsRef.current) {
       setActiveSector(null);
@@ -1734,7 +1851,7 @@ ${newsCtx || "-"}
   }, {
     id: "zero",
     icon: "🎯",
-    label: "제로투원"
+    label: "100억 뉴스"
   }, {
     id: "ai",
     icon: "🤖",
@@ -1818,10 +1935,10 @@ JSON 배열만 반환 (마크다운 금지). 형식:
         const cur = livePrices[s.ticker] ?? s.price;
         const costPerShare = s.shares > 0 ? s.costBasis / s.shares : 0;
         const pnlPct = costPerShare > 0 ? ((cur - costPerShare) / costPerShare * 100).toFixed(1) : "0";
-        return `${s.ticker}: ${s.shares}주, 원가$${costPerShare.toFixed(2)}, 현재$${cur?.toFixed(2)}, 손익${pnlPct}%`;
+        return `${s.ticker}: ${s.shares}주, 원가${costPerShare.toFixed(2)} USD, 현재${cur?.toFixed(2)} USD, 손익${pnlPct}%`;
       }).join("\n");
       const newsContext = Object.entries(ND.tickerAnalysis || {}).slice(0,7)
-        .map(([k,v]) => `${k}: 시그널=${v.signal}, 목표$${v.targetPrice}, ${v.why?.slice(0,80)}`).join("\n");
+        .map(([k,v]) => `${k}: 시그널=${v.signal}, 목표${v.targetPrice} USD, ${v.why?.slice(0,80)}`).join("\n");
       const data = await callClaude({
         model: "claude-sonnet-4-6",
         max_tokens: 2000,
@@ -1861,7 +1978,90 @@ JSON 배열만 반환 (마크다운 금지):
       alerts: (p.alerts || []).map(a => a.id === id ? { ...a, acknowledged: true } : a)
     }));
   };
-  const QUICK = ["PLTR 지금 팔아야 해?", "TSL3 손절 타이밍", "제로투원 추천 종목", "700만불 전략"];
+  // 6대 투자 대가 페르소나 — 각 대가의 철학을 system prompt 에 주입해 "적합성" 분석
+  const INVESTORS = [
+    { key: "thiel", label: "피터 틸", color: "#7f77dd",
+      philosophy: `당신은 피터 틸(Peter Thiel)입니다. 『제로투원』의 저자이자 팰런티어·페이팔 공동창업자의 관점에서 분석하세요.
+
+[철학]
+- "경쟁은 패배자의 게임이다" — 독점(monopoly)만이 초과수익의 원천
+- 독점의 4대 특성: ① 독점기술(경쟁 대비 10배 이상 우수) ② 네트워크 효과 ③ 규모의 경제 ④ 강력한 브랜드
+- "비밀(secret)" — 아직 세상이 모르는 중요한 진실을 찾아라
+- 수직적 진보(0→1, 새로운 것)는 수평적 진보(1→n, 복제)보다 훨씬 가치있다
+- 회사 가치의 대부분은 미래 현금흐름의 말기(terminal value)에 있다 — Last mover advantage
+- 7가지 질문: 공학(Engineering) / 타이밍(Timing) / 독점(Monopoly) / 사람(People) / 유통(Distribution) / 지속가능성(Durability) / 비밀(Secret)
+- 스타트업은 소수에게 집중, 다각화는 약점의 표시` },
+    { key: "munger", label: "찰리 멍거", color: "#ffd60a",
+      philosophy: `당신은 찰리 멍거(Charlie Munger)입니다. 버크셔 해서웨이 부회장의 관점에서 분석하세요.
+
+[철학]
+- "훌륭한 사업을 공정한 가격에 > 그저 그런 사업을 싼 가격에"
+- 멀티멘털 모델(Multiple Mental Models): 심리학·수학·생물학·경제학을 결합해 사고하라
+- 장기 투자수익률은 기업의 ROIC에 수렴한다 — 15% 이상이 이상적
+- Inversion(뒤집어 생각): "어떻게 하면 잃을까?"를 먼저 묻는다
+- Lollapalooza 효과: 여러 심리 편향이 한 방향으로 겹치면 극단적 결과
+- 인센티브가 결과를 지배한다 — 경영진 보상 구조를 봐라
+- 너무 어려우면 "Too hard pile"에 넣고 넘어가라 — 확실한 것만 친다
+- Patience + Decisiveness — 기다렸다가 몇 번만 크게 베팅` },
+    { key: "buffett", label: "워런 버핏", color: "#00c805",
+      philosophy: `당신은 워런 버핏(Warren Buffett)입니다. 버크셔 해서웨이 CEO의 관점에서 분석하세요.
+
+[철학]
+- 경제적 해자(Economic Moat): 브랜드·전환비용·네트워크효과·원가우위·규제 중 무엇이 해자인지
+- 이해할 수 있는 사업에만 투자 — Circle of competence 안에 있는가
+- 이상적 보유기간은 "영원(forever)"
+- 재무 체크리스트: ROE > 15%, ROIC > 15%, 부채비율 낮음, 일관된 FCF, 자사주 매입 or 배당
+- 훌륭한 자본배분 능력의 경영진 — 주주 서한/IR을 읽어라
+- "가격은 당신이 지불하는 것, 가치는 당신이 얻는 것" — 내재가치 대비 할인 필요
+- Mr. Market은 기분파 — 공포에 사고 탐욕에 팔아라
+- 다각화는 무지의 방어책 — 집중투자 선호(top 5~10개)` },
+    { key: "lynch", label: "피터 린치", color: "#ff9500",
+      philosophy: `당신은 피터 린치(Peter Lynch)입니다. 전 피델리티 마젤란 펀드매니저의 관점에서 분석하세요.
+
+[철학]
+- "Invest in what you know" — 본인이 이해하고 써보는 사업에 투자
+- PEG(PE/성장률) < 1 이 매수 기준, PEG > 2 는 과열
+- 10-bagger(10배주) 발견: 작고 조용한 섹터, 지루한 회사에서 나온다
+- 6대 카테고리로 분류하고 기대치를 맞춘다:
+  ① Slow growers (저성장·배당주)
+  ② Stalwarts (견실주, 10~12% 성장 대형주)
+  ③ Fast growers ★ (20~25% 성장, 10-bagger 후보)
+  ④ Cyclicals (경기민감주 — 타이밍)
+  ⑤ Turnarounds (턴어라운드 — 특수상황)
+  ⑥ Asset plays (자산주 — 숨은 가치)
+- "Hot industry, hot stock"은 피해라 — 틈새·재미없는 섹터에 기회
+- 레버리지 없는 우량 재무제표, 낮은 기관보유율(미발견) 선호
+- 스토리가 간단히 설명되어야 한다 — 크레용으로 그릴 수 있을 만큼` },
+    { key: "wood", label: "캐시 우드", color: "#ff5000",
+      philosophy: `당신은 캐시 우드(Cathie Wood)입니다. ARK Invest CEO의 관점에서 분석하세요.
+
+[철학]
+- 5대 파괴적 혁신 플랫폼(Disruptive Innovation Platforms)에만 투자:
+  ① AI / 머신러닝 · 생성형 AI
+  ② 로보틱스 / 자율주행 / 전기차
+  ③ 유전체학 / 정밀의료 / 합성생물학
+  ④ 블록체인 / 디지털 지갑 / DeFi
+  ⑤ 에너지저장 / 배터리 / 재생에너지
+- Wright's Law — 생산량 2배마다 단위원가 약 20~30% 하락 → S-curve 가속 구간 포착
+- 5년 연복리 기대수익률(CAGR) 15% 이상 기업에 집중
+- TAM(Total Addressable Market)이 현재의 100~1000배 될 잠재력이 있는가
+- 지수 편입·단기 변동성 무시 — 고신념 집중 포트폴리오(Top 10이 50%+)
+- 현금흐름 없어도 OK — R&D·CAPEX 선투자가 해자
+- "Benchmark agnostic" — 인덱스에 끌려가지 않는다` },
+    { key: "laffont", label: "필립 라폰트", color: "#00b4d8",
+      philosophy: `당신은 필립 라폰트(Philippe Laffont)입니다. Coatue Management 창업자의 관점에서 분석하세요.
+
+[철학]
+- 기술 중심 롱숏 헤지펀드 — TMT(Tech/Media/Telecom) 테마에 집중
+- 대형 구조적 테마 포트폴리오:
+  ① 모바일 ② 클라우드 / SaaS ③ AI / 데이터 ④ 이커머스 ⑤ 핀테크 ⑥ 빅데이터
+- Crossover 전략: 공모+사모를 함께 봐서 비상장에서 조기 포지션
+- 4축 평가: 경쟁우위(Competitive moat) · 규모(Scale) · 성장률(Growth rate) · TAM
+- "Winners take most" — 각 카테고리 1~2위에만 투자 (승자 집중)
+- 제품 > 사람 > 시장: 혁신 제품이 플랫폼으로 진화하는지 본다
+- 퀀트 + 펀더멘털 결합 — 데이터 기반 스크리닝 + 창업자 레퍼런스 체크
+- 비중 조정을 자주 함 — 테제가 깨지면 빠르게 컷` }
+  ];
   const sigStyle = sig => {
     const map = {
       "강력매수": {
@@ -2189,12 +2389,7 @@ JSON 배열만 반환 (마크다운 금지):
       borderRadius: 12,
       padding: "12px 16px"
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 18,
-      color: "#666"
-    }
-  }, "$"), /*#__PURE__*/React.createElement("input", {
+  }, /*#__PURE__*/React.createElement("input", {
     type: "number",
     value: goalInput,
     onChange: e => setGoalInput(e.target.value),
@@ -2214,7 +2409,7 @@ JSON 배열만 반환 (마크다운 금지):
       fontSize: 18,
       color: "#666"
     }
-  }, "M")), goalInput && /*#__PURE__*/React.createElement("div", {
+  }, "M USD")), goalInput && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: "#666",
@@ -2746,7 +2941,13 @@ JSON 배열만 반환 (마크다운 금지):
       fontWeight: 600,
       color: totalPnL >= 0 ? G : R
     }
-  }, totalPnL >= 0 ? "+" : "", fmt(Math.abs(totalPnL))), /*#__PURE__*/React.createElement("span", {
+  }, totalPnL >= 0 ? "+" : "", fmt(Math.abs(totalPnL))), rate && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: "#777",
+      fontWeight: 500
+    }
+  }, totalPnL >= 0 ? "+" : "", fmtKRW(Math.abs(totalPnL), rate)), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 14,
       color: totalPnL >= 0 ? G : R
@@ -2911,7 +3112,12 @@ JSON 배열만 반환 (마크다운 금지):
     style: {
       fontSize: 13
     }
-  }, "\uC544\uB798 \uBC84\uD2BC\uC73C\uB85C \uCD94\uAC00\uD558\uC138\uC694")) : portfolio.map(stock => {
+  }, "\uC544\uB798 \uBC84\uD2BC\uC73C\uB85C \uCD94\uAC00\uD558\uC138\uC694")) : [...portfolio].sort((a, b) => {
+    // 투자금액(평가액) 많은 순 정렬 — 실시간 현재가 기준
+    const vA = (livePrices[a.ticker] ?? a.price) * a.shares;
+    const vB = (livePrices[b.ticker] ?? b.price) * b.shares;
+    return vB - vA;
+  }).map(stock => {
     const lp = getPrice(stock);
     const chg = liveChanges[stock.ticker];
     const dayChg = chg?.change ?? null;
@@ -3028,15 +3234,25 @@ JSON 배열만 반환 (마크다운 금지):
       }
     }, "LIVE")), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
-        color: "#555"
+        fontSize: 13,
+        color: "#bbb",
+        fontWeight: 600,
+        letterSpacing: -0.2
       }
-    }, stock.name, " \xB7 ", Number(stock.shares).toLocaleString(), "\uC8FC"), /*#__PURE__*/React.createElement("div", {
+    }, Number(stock.shares).toLocaleString(), "\uC8FC"), /*#__PURE__*/React.createElement("div", {
       style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
         background: "#1a1a1a",
         borderRadius: 2,
-        height: 2,
-        marginTop: 6
+        height: 4,
+        overflow: "hidden"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3045,17 +3261,30 @@ JSON 배열만 반환 (마크다운 금지):
         background: G,
         borderRadius: 2
       }
-    }))), /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#aaa",
+        minWidth: 38,
+        textAlign: "right",
+        fontVariantNumeric: "tabular-nums",
+        flexShrink: 0
+      }
+    }, weight.toFixed(1) + "%"))), /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "right",
-        flexShrink: 0
+        flexShrink: 0,
+        minWidth: 110,
+        fontVariantNumeric: "tabular-nums"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 16,
-        fontWeight: 700
+        fontSize: 15,
+        fontWeight: 700,
+        whiteSpace: "nowrap"
       }
-    }, "$", lp.toFixed(2)), /*#__PURE__*/React.createElement("div", {
+    }, fmtPrice(lp)), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: dayChg != null ? dayChg >= 0 ? G : R : "#555",
@@ -3065,13 +3294,15 @@ JSON 배열만 반환 (마크다운 금지):
       style: {
         textAlign: "right",
         flexShrink: 0,
-        minWidth: 80
+        minWidth: 100,
+        fontVariantNumeric: "tabular-nums"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: 600,
-        color: pnl >= 0 ? G : R
+        color: pnl >= 0 ? G : R,
+        whiteSpace: "nowrap"
       }
     }, pnl >= 0 ? "+" : "", fmt(pnl)), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3087,7 +3318,9 @@ JSON 배열만 반환 (마크다운 금지):
         fontSize: 11,
         fontWeight: 700,
         whiteSpace: "nowrap",
-        flexShrink: 0
+        flexShrink: 0,
+        minWidth: 60,
+        textAlign: "center"
       }
     }, stock.ticker === "TSL3" ? "즉시매도" : pnlPct > 80 ? "강력매수" : pnlPct > 30 ? "매수" : pnlPct > 0 ? "보유" : "매도검토"))), expanded && /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3112,7 +3345,7 @@ JSON 배열만 반환 (마크다운 금지):
       val: weight.toFixed(1) + "%"
     }, {
       label: "현재가",
-      val: "$" + lp.toFixed(2)
+      val: fmtPrice(lp)
     }, {
       label: "원화가",
       val: rate ? fmtKRW(lp, rate) : "—"
@@ -3549,28 +3782,38 @@ JSON 배열만 반환 (마크다운 금지):
     ),
     /*#__PURE__*/React.createElement("div", {
     style: {
+      fontSize: 12,
+      color: "#666",
+      marginBottom: 8,
+      fontWeight: 600
+    }
+  }, "\uD22C\uC790 \uB300\uAC00 \uC120\uD0DD (\uD68C\uC0AC\uB97C \uC785\uB825\uD558\uBA74 \uC120\uD0DD\uD55C \uB300\uAC00\uC758 \uAD00\uC810\uC73C\uB85C \uC801\uD569\uC131 \uBD84\uC11D)"),
+  /*#__PURE__*/React.createElement("div", {
+    style: {
       display: "flex",
       flexWrap: "wrap",
       gap: 8,
       marginBottom: 16
     }
-  }, QUICK.map(q => /*#__PURE__*/React.createElement("button", {
-    key: q,
-    onClick: () => {
-      setAiQuery(q);
-      askAI(q);
-    },
-    style: {
-      background: "#1a1a1a",
-      border: "none",
-      borderRadius: 20,
-      color: "#999",
-      padding: "8px 14px",
-      fontSize: 13,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    }
-  }, q))), /*#__PURE__*/React.createElement("div", {
+  }, INVESTORS.map(inv => {
+    const active = activeInvestor === inv.key;
+    return /*#__PURE__*/React.createElement("button", {
+      key: inv.key,
+      onClick: () => setActiveInvestor(active ? null : inv.key),
+      style: {
+        background: active ? inv.color : "#1a1a1a",
+        border: active ? `2px solid ${inv.color}` : "2px solid transparent",
+        borderRadius: 20,
+        color: active ? "#000" : inv.color,
+        padding: "8px 14px",
+        fontSize: 13,
+        fontWeight: active ? 800 : 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        transition: "all 0.15s"
+      }
+    }, inv.label);
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
@@ -3580,7 +3823,9 @@ JSON 배열만 반환 (마크다운 금지):
     value: aiQuery,
     onChange: e => setAiQuery(e.target.value),
     onKeyDown: e => e.key === "Enter" && askAI(aiQuery),
-    placeholder: "\uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694...",
+    placeholder: activeInvestor
+      ? `\uD68C\uC0AC \uC774\uB984/\uD2F0\uCEE4 \uC785\uB825 (${(INVESTORS.find(i => i.key === activeInvestor) || {}).label} \uAD00\uC810\uC73C\uB85C \uBD84\uC11D)`
+      : "\uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694...",
     style: {
       flex: 1,
       background: "#1a1a1a",
@@ -3828,17 +4073,17 @@ JSON 배열만 반환 (마크다운 금지):
       { id: "month", label: "Monthly", ko: "이번달" }
     ];
     const IMP = { high: { bg: "rgba(255,80,0,0.14)", fg: R, label: "중요" }, medium: { bg: "rgba(255,213,10,0.12)", fg: "#ffd60a", label: "참고" }, low: { bg: "#1a1a1a", fg: "#888", label: "일반" } };
-    // portfolio 순서로 정렬
+    // portfolio 순서로 전체 표시 (뉴스 없는 티커도 갱신 버튼 노출)
     const portfolioOrder = (portfolio || []).map(p => p.ticker);
-    const tickers = portfolioOrder.filter(t => SN[t] && SN[t].length);
+    const tickers = portfolioOrder;
     return /*#__PURE__*/React.createElement("div", {
       style: { background: "#111", borderRadius: 14, padding: "14px 16px", marginBottom: 20 }
     },
       /*#__PURE__*/React.createElement("div", {
         style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }
       },
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#ccc" } }, "📰 종목별 뉴스"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#555" } }, "갱신: ", ref.toLocaleDateString("ko-KR"))
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#ccc" } }, "📰 100억 뉴스"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#555" } }, "최종갱신: ", ref.toLocaleDateString("ko-KR"))
       ),
       /*#__PURE__*/React.createElement("div", {
         style: { display: "flex", gap: 6, marginBottom: 14, background: "#0a0a0a", padding: 4, borderRadius: 10 }
@@ -3854,24 +4099,25 @@ JSON 배열만 반환 (마크다운 금지):
             fontSize: 12, fontWeight: 700,
             cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s"
           }
-        }, b.label, " ", /*#__PURE__*/React.createElement("span", {
-          style: { fontSize: 10, opacity: 0.7, marginLeft: 3 }
-        }, b.ko)))
+        }, b.label))
       ),
       tickers.length === 0 && /*#__PURE__*/React.createElement("div", {
         style: { textAlign: "center", padding: "30px 0", color: "#666", fontSize: 13 }
-      }, "📭 ", rangeLabel, " 뉴스 데이터 없음 (07:00 KST 스케줄러 갱신 대기)"),
+      }, "📭 포트폴리오에 종목이 없습니다"),
       tickers.map(tk => {
         const pos = (portfolio || []).find(p => p.ticker === tk);
         const items = (SN[tk] || [])
           .filter(n => {
             if (!n.date) return false;
             const d = new Date(n.date);
-            return (ref.getTime() - d.getTime()) <= cutoff && (ref.getTime() - d.getTime()) >= -dayMs * 2; // 미래 이벤트(D-DAY)도 2일까지 허용
+            return (now.getTime() - d.getTime()) <= cutoff && (now.getTime() - d.getTime()) >= -dayMs * 2; // 미래 이벤트(D-DAY)도 2일까지 허용
           })
           .filter(n => newsRange === "today" ? n.importance === "high" : n.importance !== "low")
           .sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (items.length === 0) return null;
+        const loading = !!tickerNewsLoading[tk];
+        const err = tickerNewsError[tk];
+        const refreshedAt = tickerNewsRefreshed[tk];
+        const refreshedLabel = refreshedAt ? new Date(refreshedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : null;
         return /*#__PURE__*/React.createElement("div", {
           key: tk,
           style: { marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #1a1a1a" }
@@ -3886,9 +4132,36 @@ JSON 배열만 반환 (마크다운 금지):
               style: { fontSize: 11, color: "#888" }
             }, pos.name, " · ", pos.sector),
             /*#__PURE__*/React.createElement("div", {
-              style: { marginLeft: "auto", fontSize: 10, color: "#555", background: "#1a1a1a", padding: "2px 7px", borderRadius: 6 }
-            }, items.length, "건")
+              style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }
+            },
+              refreshedLabel && /*#__PURE__*/React.createElement("span", {
+                style: { fontSize: 10, color: "#00c805" }
+              }, "⟳ ", refreshedLabel),
+              /*#__PURE__*/React.createElement("span", {
+                style: { fontSize: 10, color: "#555", background: "#1a1a1a", padding: "2px 7px", borderRadius: 6 }
+              }, items.length, "건"),
+              /*#__PURE__*/React.createElement("button", {
+                onClick: () => refreshTickerNews(tk, pos ? pos.name : tk),
+                disabled: loading,
+                title: `${tk} 뉴스 현재기준 갱신`,
+                style: {
+                  background: loading ? "#1a1a1a" : "rgba(0,200,5,0.14)",
+                  border: `1px solid ${loading ? "#222" : "#00c80555"}`,
+                  color: loading ? "#555" : "#00c805",
+                  fontSize: 10, fontWeight: 700,
+                  padding: "3px 9px", borderRadius: 6,
+                  cursor: loading ? "default" : "pointer",
+                  fontFamily: "inherit", transition: "all 0.15s"
+                }
+              }, loading ? "갱신중…" : "↻ 갱신")
+            )
           ),
+          err && /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 11, color: "#ff5000", marginBottom: 8, padding: "6px 10px", background: "rgba(255,80,0,0.08)", borderRadius: 6 }
+          }, "⚠️ ", err),
+          items.length === 0 && !err && !loading && /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 11, color: "#555", padding: "8px 10px", fontStyle: "italic" }
+          }, rangeLabel, " 범위 뉴스 없음 — 갱신 버튼을 눌러 최신 뉴스를 불러오세요"),
           items.map((n, i) => {
             const imp = IMP[n.importance] || IMP.low;
             const d = new Date(n.date);
