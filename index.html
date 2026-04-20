@@ -791,6 +791,119 @@ const DEFAULT_RATES = {
   TSL3: -20
 };
 const FINNHUB_KEY = "d7bq4f1r01qom0rbrmkgd7bq4f1r01qom0rbrml0";
+const FMP_KEY = "IbFHosuKkJdgKFDNzRCGCp7LKpEPEKYH";
+// 미국 비상장 티커용 Yahoo 심볼 별칭 (TSL3는 LSE 상장 Leverage Shares 3x Long TSLA ETP, USD 표기)
+const SYMBOL_ALIAS = {
+  TSL3: ["TSL3.L", "3TSL.L", "TSL3.DE"]
+};
+async function _fetchFH(sym) {
+  const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`, {
+    signal: AbortSignal.timeout(5000)
+  });
+  const d = await r.json();
+  if (d.c && d.c > 0) return { sym, price: d.c, change: d.dp, src: "Finnhub" };
+  return null;
+}
+async function _fetchFMP(sym) {
+  const r = await fetch(`https://financialmodelingprep.com/api/v3/quote-short/${sym}?apikey=${FMP_KEY}`, {
+    signal: AbortSignal.timeout(5000)
+  });
+  const d = await r.json();
+  if (Array.isArray(d) && d[0]?.price > 0) return { sym, price: d[0].price, change: null, src: "FMP" };
+  return null;
+}
+async function _fetchYahoo(sym, origSym) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!r.ok) return null;
+  const d = await r.json();
+  const res = d?.chart?.result?.[0];
+  if (!res) return null;
+  const meta = res.meta || {};
+  const price = meta.regularMarketPrice;
+  const prev = meta.chartPreviousClose ?? meta.previousClose;
+  if (price && price > 0) {
+    const change = prev > 0 ? ((price - prev) / prev) * 100 : null;
+    return { sym: origSym || sym, price, change, src: "Yahoo" };
+  }
+  return null;
+}
+async function _fetchStooq(sym, origSym) {
+  const url = `https://stooq.com/q/l/?s=${encodeURIComponent(sym.toLowerCase())}&f=sd2t2c&h&e=csv`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!r.ok) return null;
+  const txt = await r.text();
+  const lines = txt.trim().split(/\r?\n/);
+  if (lines.length < 2) return null;
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const vals = lines[1].split(",");
+  const closeIdx = headers.indexOf("close");
+  if (closeIdx < 0) return null;
+  const price = parseFloat(vals[closeIdx]);
+  if (!isFinite(price) || price <= 0) return null;
+  return { sym: origSym || sym, price, change: null, src: "Stooq" };
+}
+function _fetchFromSnapshot(sym) {
+  const snap = (typeof window !== "undefined" && window.__NEWS_DATA?.tickerAnalysis?.[sym]) || null;
+  const p = snap?.currentPrice;
+  if (p && p > 0) return { sym, price: p, change: null, src: "스냅샷" };
+  return null;
+}
+// 한 티커에 대해 전체 폴백 체인을 돌려 현재가를 가져온다 (사진 업로드/주기 갱신 공용)
+async function fetchLivePriceForSym(sym) {
+  try { const r = await _fetchFH(sym); if (r) return r; } catch (e) {}
+  try { const r = await _fetchFMP(sym); if (r) return r; } catch (e) {}
+  try { const r = await _fetchYahoo(sym, sym); if (r) return r; } catch (e) {}
+  const aliases = SYMBOL_ALIAS[sym] || [];
+  for (const alt of aliases) {
+    try { const r = await _fetchYahoo(alt, sym); if (r) return r; } catch (e) {}
+  }
+  const stooqSyms = [sym, ...aliases.map(a => a.replace(/\.L$/i, ".UK").replace(/\.DE$/i, ".DE"))];
+  for (const alt of stooqSyms) {
+    try { const r = await _fetchStooq(alt, sym); if (r) return r; } catch (e) {}
+  }
+  const snap = _fetchFromSnapshot(sym);
+  if (snap) return snap;
+  return { sym, price: null, change: null, src: null };
+}
+// 여러 티커 병렬 조회 → {prices, changes, sources} 반환
+async function fetchLivePricesForTickers(tickers) {
+  const uniq = [...new Set((tickers || []).filter(t => typeof t === "string" && t.length > 0))];
+  if (!uniq.length) return { prices: {}, changes: {}, sources: [] };
+  const results = await Promise.all(uniq.map(fetchLivePriceForSym));
+  const prices = {}, changes = {}, sourceSet = new Set();
+  results.forEach(({ sym, price, change, src }) => {
+    if (price && price > 0) {
+      prices[sym] = price;
+      changes[sym] = { change };
+      if (src) sourceSet.add(src);
+    }
+  });
+  return { prices, changes, sources: [...sourceSet] };
+}
+// livePrices 로컬 캐시 (창을 껐다 켜도 재조회 전까지 최신 현재가 표시)
+const LIVE_PRICES_STORAGE_KEY = "live_prices_cache_v1";
+function loadLivePricesCache() {
+  try {
+    const raw = localStorage.getItem(LIVE_PRICES_STORAGE_KEY);
+    if (!raw) return { prices: {}, changes: {}, savedAt: null };
+    const p = JSON.parse(raw);
+    return {
+      prices: (p && p.prices && typeof p.prices === "object") ? p.prices : {},
+      changes: (p && p.changes && typeof p.changes === "object") ? p.changes : {},
+      savedAt: p?.savedAt || null
+    };
+  } catch (e) { return { prices: {}, changes: {}, savedAt: null }; }
+}
+function saveLivePricesCache(prices, changes) {
+  try {
+    localStorage.setItem(LIVE_PRICES_STORAGE_KEY, JSON.stringify({
+      prices: prices || {},
+      changes: changes || {},
+      savedAt: Date.now()
+    }));
+  } catch (e) {}
+}
 const EMPTY = {
   ticker: "",
   name: "",
@@ -983,10 +1096,12 @@ function App() {
     return loaded !== null ? loaded : INITIAL_PORTFOLIO;
   });
   const [tab, setTab] = useState("portfolio");
-  const [livePrices, setLivePrices] = useState({});
-  const [liveChanges, setLiveChanges] = useState({});
+  // 창을 껐다 켜도 마지막으로 받아온 현재가가 즉시 표시되도록 localStorage 캐시에서 초기화
+  const _initialPriceCache = (typeof window !== "undefined") ? loadLivePricesCache() : { prices: {}, changes: {}, savedAt: null };
+  const [livePrices, setLivePrices] = useState(_initialPriceCache.prices || {});
+  const [liveChanges, setLiveChanges] = useState(_initialPriceCache.changes || {});
   const [priceLoading, setPriceLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(_initialPriceCache.savedAt ? new Date(_initialPriceCache.savedAt) : null);
   const [usdKrw, setUsdKrw] = useState(null);
   const [manualRate, setManualRate] = useState(null);
   const [editingRate, setEditingRate] = useState(false);
@@ -1139,94 +1254,6 @@ function App() {
   const [priceSource, setPriceSource] = useState("연결 중...");
   const [priceError, setPriceError] = useState(false);
   useEffect(() => {
-    const FMP_KEY = "IbFHosuKkJdgKFDNzRCGCp7LKpEPEKYH";
-    // 미국 비상장 티커용 Yahoo 심볼 별칭 (TSL3는 LSE 상장 Leverage Shares 3x Long TSLA ETP, USD 표기)
-    const SYMBOL_ALIAS = {
-      TSL3: ["TSL3.L", "3TSL.L", "TSL3.DE"]
-    };
-    const fetchFH = async sym => {
-      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`, {
-        signal: AbortSignal.timeout(5000)
-      });
-      const d = await r.json();
-      if (d.c && d.c > 0) return {
-        sym,
-        price: d.c,
-        change: d.dp,
-        src: "Finnhub"
-      };
-      return null;
-    };
-    const fetchFMP = async sym => {
-      const r = await fetch(`https://financialmodelingprep.com/api/v3/quote-short/${sym}?apikey=${FMP_KEY}`, {
-        signal: AbortSignal.timeout(5000)
-      });
-      const d = await r.json();
-      if (Array.isArray(d) && d[0]?.price > 0) return {
-        sym,
-        price: d[0].price,
-        change: null,
-        src: "FMP"
-      };
-      return null;
-    };
-    // Yahoo Finance Chart v8 — 해외 상장 ETP(TSL3.L 등) 폴백. CORS 허용됨.
-    const fetchYahoo = async (sym, origSym) => {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) return null;
-      const d = await r.json();
-      const res = d?.chart?.result?.[0];
-      if (!res) return null;
-      const meta = res.meta || {};
-      const price = meta.regularMarketPrice;
-      const prev = meta.chartPreviousClose ?? meta.previousClose;
-      if (price && price > 0) {
-        const change = prev > 0 ? ((price - prev) / prev) * 100 : null;
-        return {
-          sym: origSym || sym,
-          price,
-          change,
-          src: "Yahoo"
-        };
-      }
-      return null;
-    };
-    // Stooq CSV — CORS-friendly, 유럽 거래소 커버리지(tsl3.uk 등). Yahoo가 막히면 최종 실시간 폴백.
-    const fetchStooq = async (sym, origSym) => {
-      const url = `https://stooq.com/q/l/?s=${encodeURIComponent(sym.toLowerCase())}&f=sd2t2c&h&e=csv`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) return null;
-      const txt = await r.text();
-      const lines = txt.trim().split(/\r?\n/);
-      if (lines.length < 2) return null;
-      const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
-      const vals = lines[1].split(",");
-      const closeIdx = headers.indexOf("close");
-      if (closeIdx < 0) return null;
-      const price = parseFloat(vals[closeIdx]);
-      if (!isFinite(price) || price <= 0) return null;
-      return {
-        sym: origSym || sym,
-        price,
-        change: null,
-        src: "Stooq"
-      };
-    };
-    // __NEWS_DATA 일일 스냅샷 (07:00 KST 스케줄러가 Yahoo MCP로 갱신 — 실시간은 아님)
-    const fetchFromSnapshot = sym => {
-      const snap = window.__NEWS_DATA?.tickerAnalysis?.[sym];
-      const p = snap?.currentPrice;
-      if (p && p > 0) {
-        return {
-          sym,
-          price: p,
-          change: null,
-          src: "스냅샷"
-        };
-      }
-      return null;
-    };
     const fetchAll = async () => {
       // 포트폴리오 + 제로투원 후보 종목을 모두 실시간 조회 대상에 포함
       const zeroSyms = Array.isArray(zeroStocks)
@@ -1238,76 +1265,12 @@ function App() {
         return;
       }
       setPriceError(false);
-      const results = await Promise.all(syms.map(async sym => {
-        // 1차 — Finnhub (미국 주식)
-        try {
-          const r = await fetchFH(sym);
-          if (r) return r;
-        } catch {}
-        // 2차 — FMP (미국 주식)
-        try {
-          const r = await fetchFMP(sym);
-          if (r) return r;
-        } catch {}
-        // 3차 — Yahoo 기본 심볼
-        try {
-          const r = await fetchYahoo(sym, sym);
-          if (r) return r;
-        } catch {}
-        // 4차 — Yahoo 해외 거래소 별칭 순차 시도 (TSL3 → TSL3.L / 3TSL.L / TSL3.DE)
-        const aliases = SYMBOL_ALIAS[sym] || [];
-        for (const alt of aliases) {
-          try {
-            const r = await fetchYahoo(alt, sym);
-            if (r) return r;
-          } catch {}
-        }
-        // 5차 — Stooq CSV (기본 심볼 + 별칭 조합, .uk/.de로 변환)
-        const stooqSyms = [sym, ...aliases.map(a => a.replace(/\.L$/i, ".UK").replace(/\.DE$/i, ".DE"))];
-        for (const alt of stooqSyms) {
-          try {
-            const r = await fetchStooq(alt, sym);
-            if (r) return r;
-          } catch {}
-        }
-        // 6차 — 최후 폴백: __NEWS_DATA 일일 스냅샷 (실시간 아님, UI에 '스냅샷' 표시)
-        const snap = fetchFromSnapshot(sym);
-        if (snap) return snap;
-        return {
-          sym,
-          price: null,
-          change: null,
-          src: null
-        };
-      }));
-      const prices = {},
-        changes = {},
-        sources = new Set();
-      results.forEach(({
-        sym,
-        price,
-        change,
-        src
-      }) => {
-        if (price && price > 0) {
-          prices[sym] = price;
-          changes[sym] = {
-            change
-          };
-          if (src) sources.add(src);
-        }
-      });
+      const { prices, changes, sources } = await fetchLivePricesForTickers(syms);
       if (Object.keys(prices).length > 0) {
-        setLivePrices(p => ({
-          ...p,
-          ...prices
-        }));
-        setLiveChanges(p => ({
-          ...p,
-          ...changes
-        }));
+        setLivePrices(p => ({ ...p, ...prices }));
+        setLiveChanges(p => ({ ...p, ...changes }));
         setLastUpdated(new Date());
-        setPriceSource([...sources].join("+") + " 실시간");
+        setPriceSource(sources.join("+") + " 실시간");
         setPriceError(false);
       } else {
         setPriceError(true);
@@ -1323,6 +1286,12 @@ function App() {
   useEffect(() => {
     savePortfolioToStorage(portfolio);
   }, [portfolio]);
+  // livePrices 변경 시 localStorage 캐시 업데이트 (창 재오픈 시 즉시 현재가 표시)
+  useEffect(() => {
+    if (livePrices && Object.keys(livePrices).length > 0) {
+      saveLivePricesCache(livePrices, liveChanges);
+    }
+  }, [livePrices, liveChanges]);
   // 사용자 설정(제목·목표·마감일·성장률) 변경 시 자동 저장
   useEffect(() => {
     saveUserSettings({ appTitle, goal, deadline, stockRates });
@@ -1538,7 +1507,7 @@ JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 
         return;
       }
       // 7) 포트폴리오 교체 (기존 동작 유지 — 증권사 스크린샷 초기 등록 가정)
-      const cleaned = parsed
+      let cleaned = parsed
         .filter(s => s && s.ticker)
         .map((s, i) => ({
           id: Date.now() + i,
@@ -1554,8 +1523,35 @@ JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 
         setPhotoResult("⚠️ 추출된 종목의 필수값(티커/수량)이 부족합니다. 다른 화면으로 시도해주세요.");
         return;
       }
+      // 7-1) 사진 속 가격은 촬영 시점 가격이므로 즉시 현재가로 덮어쓰기 (실시간 폴백 체인)
+      let livePriceCount = 0;
+      try {
+        const tickers = [...new Set(cleaned.map(s => s.ticker))];
+        const { prices, changes, sources } = await fetchLivePricesForTickers(tickers);
+        livePriceCount = Object.keys(prices).length;
+        if (livePriceCount > 0) {
+          cleaned = cleaned.map(s => ({
+            ...s,
+            // 라이브 현재가가 있으면 그 값으로 교체, 없으면 사진 가격 유지
+            price: (prices[s.ticker] && prices[s.ticker] > 0) ? prices[s.ticker] : s.price
+          }));
+          // livePrices/liveChanges/lastUpdated/priceSource를 즉시 갱신해 첫 렌더부터 현재가 표시
+          setLivePrices(p => ({ ...p, ...prices }));
+          setLiveChanges(p => ({ ...p, ...changes }));
+          setLastUpdated(new Date());
+          if (sources.length) setPriceSource(sources.join("+") + " 실시간");
+          setPriceError(false);
+          // livePrices 자동 저장 useEffect가 곧 localStorage 캐시에 반영
+        }
+      } catch (fetchErr) {
+        // 실시간 조회 실패해도 사진 가격으로 계속 진행 (15초 주기 useEffect가 재시도)
+      }
       setPortfolio(cleaned);
-      setPhotoResult(`✓ ${cleaned.length}개 종목 인식 완료 — 포트폴리오를 교체했습니다.`);
+      setPhotoResult(
+        livePriceCount > 0
+          ? `✓ ${cleaned.length}개 종목 인식 완료 — ${livePriceCount}개 현재가 즉시 반영했습니다.`
+          : `✓ ${cleaned.length}개 종목 인식 완료 — 포트폴리오를 교체했습니다. (현재가 조회는 곧 갱신됩니다)`
+      );
     } catch (err) {
       // 8) 구체적 오류 메시지 분기
       if (err.code === "NO_API_KEY") {
