@@ -2,8 +2,57 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>투자 비서 📊</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>하와이백억아빠 투자가이드</title>
+<!-- ===== PWA ===== -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="description" content="2030년까지 700만불 달성 — 포트폴리오 추적 · 실시간 가격 · AI 분석">
+<!-- iOS / Safari -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="100억 투자">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<!-- Android Chrome / Samsung Internet -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="100억 투자">
+<style>html,body{background:#0a0a0a;overscroll-behavior-y:contain;}
+@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }</style>
+<script>
+  // Service Worker 등록 — PWA 설치 & 오프라인 지원
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js", { scope: "./" })
+        .then(reg => {
+          // 새 버전 감지 시 자동 활성화
+          reg.addEventListener("updatefound", () => {
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener("statechange", () => {
+              if (nw.state === "installed" && navigator.serviceWorker.controller) {
+                // 새 SW 대기 중 — 다음 새로고침 때 적용
+                nw.postMessage("SKIP_WAITING");
+              }
+            });
+          });
+        })
+        .catch(err => console.warn("[SW] register failed:", err));
+    });
+  }
+  // A2HS(홈 화면 추가) 프롬프트 — beforeinstallprompt 이벤트 저장
+  window.__installPromptEvent = null;
+  window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault();
+    window.__installPromptEvent = e;
+    window.dispatchEvent(new CustomEvent("pwa-installable"));
+  });
+  window.addEventListener("appinstalled", () => {
+    window.__installPromptEvent = null;
+    console.log("[PWA] installed");
+  });
+</script>
 <script>/* React 18.2 */
 /**
  * @license React
