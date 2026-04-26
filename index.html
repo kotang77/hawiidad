@@ -58,15 +58,8 @@
     }
 
     window.addEventListener("load", function(){
-      // sw.js 존재 여부를 먼저 확인 (HEAD) — 없으면 register 시도조차 안 함
-      fetch("./sw.js", { method: "HEAD", cache: "no-store" })
-        .then(function(r){
-          if (!r || !r.ok) {
-            __log.info("[SW] ./sw.js not found on this host; skip register");
-            return null;
-          }
-          return navigator.serviceWorker.register("./sw.js", { scope: "./" });
-        })
+      // sw.js를 직접 register — 실패하면 catch에서 조용히 로깅 (HEAD 프리체크는 일부 호스트에서 false-negative 발생)
+      navigator.serviceWorker.register("./sw.js", { scope: "./" })
         .then(function(reg){
           if (!reg) return;
           // 페이지 로드 시 즉시 update 체크 (브라우저 캐시 우회)
