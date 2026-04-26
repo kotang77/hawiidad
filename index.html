@@ -1101,6 +1101,23 @@ function fmtPriceKRW(usd, rate) {
 function pctFmt(v) {
   return (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
 }
+// 차트용 단위 없는 축약 표기 — 통화 토글에 따라 USD(K/M) 또는 KRW(만/억) 사용
+function fmtChartShort(usd, currency, rate) {
+  if (usd === null || usd === undefined || !isFinite(usd)) return "0";
+  if (currency === "KRW" && rate) {
+    const krw = usd * rate;
+    const a = Math.abs(krw);
+    const s = krw < 0 ? "-" : "";
+    if (a >= 1e8) return s + (a / 1e8).toFixed(1) + "억";
+    if (a >= 1e4) return s + Math.round(a / 1e4).toLocaleString("ko-KR") + "만";
+    return s + Math.round(a).toLocaleString("ko-KR");
+  }
+  const a = Math.abs(usd);
+  const s = usd < 0 ? "-" : "";
+  if (a >= 1e6) return s + (a / 1e6).toFixed(1) + "M";
+  if (a >= 1e3) return s + (a / 1e3).toFixed(0) + "K";
+  return s + Math.round(a).toString();
+}
 function calcScenario(rates, pf, lp, goal) {
   return YEARS.map((yr, i) => {
     const t = i === 0 ? 0.75 : i;
@@ -1612,7 +1629,7 @@ function App() {
       ctx.fillStyle = "#666";
       ctx.font = "11px -apple-system,sans-serif";
       ctx.textAlign = "right";
-      ctx.fillText(v >= 1e6 ? (v / 1e6).toFixed(1) + "M USD" : (v / 1e3).toFixed(0) + "K USD", pad.left - 8, y + 4);
+      ctx.fillText(fmtChartShort(v, currency, rate), pad.left - 8, y + 4);
     }
     ctx.setLineDash([6, 4]);
     ctx.strokeStyle = "rgba(255,255,255,0.3)";
@@ -1625,7 +1642,7 @@ function App() {
     ctx.fillStyle = "rgba(255,255,255,0.5)";
     ctx.font = "bold 10px -apple-system,sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText("목표 " + fmt(goal), pad.left + 4, yP(goal) - 5);
+    ctx.fillText("목표 " + fmtChartShort(goal, currency, rate), pad.left + 4, yP(goal) - 5);
     ctx.beginPath();
     simPoints.forEach((p, i) => {
       i === 0 ? ctx.moveTo(xP(i), yP(p.total)) : ctx.lineTo(xP(i), yP(p.total));
@@ -1654,12 +1671,12 @@ function App() {
       ctx.fillStyle = p.hit ? G : "rgba(255,255,255,0.6)";
       ctx.font = "bold 10px -apple-system,sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(p.total >= 1e6 ? (p.total / 1e6).toFixed(1) + "M USD" : (p.total / 1e3).toFixed(0) + "K USD", xP(i), yP(p.total) - 10);
+      ctx.fillText(fmtChartShort(p.total, currency, rate), xP(i), yP(p.total) - 10);
       ctx.fillStyle = "rgba(255,255,255,0.35)";
       ctx.font = "10px -apple-system,sans-serif";
       ctx.fillText(p.year, xP(i), H - 8);
     });
-  }, [simPoints, tab, goal]);
+  }, [simPoints, tab, goal, currency, rate]);
   const handleAdd = () => {
     setAddError("");
     const ticker = newStock.ticker.toUpperCase().trim();
@@ -3894,39 +3911,7 @@ JSON 배열만 반환 (마크다운 금지):
         fontWeight: 600,
         letterSpacing: -0.2
       }
-    }, Number(stock.shares).toLocaleString(), "\uC8FC"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginTop: 6
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1,
-        background: "#1a1a1a",
-        borderRadius: 2,
-        height: 4,
-        overflow: "hidden"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        height: "100%",
-        width: Math.min(weight, 100) + "%",
-        background: G,
-        borderRadius: 2
-      }
-    })), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 11,
-        fontWeight: 700,
-        color: "#aaa",
-        minWidth: 38,
-        textAlign: "right",
-        fontVariantNumeric: "tabular-nums",
-        flexShrink: 0
-      }
-    }, weight.toFixed(1) + "%"))), /*#__PURE__*/React.createElement("div", {
+    }, Number(stock.shares).toLocaleString() + "\uC8FC (" + weight.toFixed(1) + "%)")), /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "right",
         flexShrink: 0,
@@ -4092,13 +4077,13 @@ JSON 배열만 반환 (마크다운 금지):
         color: hit ? G : R,
         letterSpacing: -1
       }
-    }, fmt(final)), rate && /*#__PURE__*/React.createElement("div", {
+    }, fmtCur(final)), rate && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 13,
         color: hit ? "#009970" : "#cc3000",
         marginTop: 2
       }
-    }, fmtKRW(final, rate))), /*#__PURE__*/React.createElement("div", {
+    }, currency === "KRW" ? fmt(final) : fmtKRW(final, rate))), /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "right"
       }
@@ -4113,7 +4098,7 @@ JSON 배열만 반환 (마크다운 금지):
         fontSize: 12,
         color: hit ? G : R
       }
-    }, hit ? "목표 달성!" : fmt(goal - final) + " 부족"))));
+    }, hit ? "목표 달성!" : fmtCur(goal - final) + " 부족"))));
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#111",
@@ -5260,7 +5245,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-04-26 sw-autoupdate */
+/* build:2026-04-26 chart-currency-toggle */
 </script>
 </body>
 </html>
