@@ -414,7 +414,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 </head>
 <body>
 <div id="splash-intro" aria-hidden="true">
-  <img src="./intro-logo.png?v=1" alt="하와이 백억아빠" class="splash-logo" />
+  <img src="./intro-logo.png?v=3" alt="하와이 백억아빠" class="splash-logo" />
 </div>
 <style>
 #splash-intro{
@@ -424,9 +424,15 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   animation: splashFadeOut 0.3s ease 2s forwards;
 }
 #splash-intro .splash-logo{
-  width:120px; height:120px;
+  width:160px; height:160px;
   object-fit:contain;
   display:block;
+  transform-origin: center center;
+  animation: splashGrow 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes splashGrow {
+  from { transform: scale(1); }
+  to   { transform: scale(1.5); }
 }
 @keyframes splashFadeOut {
   to { opacity:0; visibility:hidden; pointer-events:none; }
@@ -434,7 +440,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 </style>
 <script>
 (function(){
-  // 2초 후 인트로 제거
+  // 2초 grow 애니메이션 후 인트로 제거 (fade 0.3s 포함)
   setTimeout(function(){
     var s=document.getElementById('splash-intro');
     if(s){ s.style.display='none'; s.parentNode && s.parentNode.removeChild(s); }
@@ -4868,7 +4874,7 @@ JSON 배열만 반환 (마크다운 금지):
       )
     );
   })()), tab === "zero" && /*#__PURE__*/React.createElement("div", null, (() => {
-    // ===== 종목별 뉴스: Today / Week / Month =====
+    // ===== 100억 핫뉴스: 보유 전체 종목의 그날 핫뉴스를 한 묶음으로 표시 =====
     const ND = (typeof window !== "undefined" && window.__NEWS_DATA) || {};
     const SN = ND.stockNews || {};
     const now = new Date();
@@ -4882,17 +4888,64 @@ JSON 배열만 반환 (마크다운 금지):
       { id: "month", label: "Monthly", ko: "이번달" }
     ];
     const IMP = { high: { bg: "rgba(255,80,0,0.14)", fg: R, label: "중요" }, medium: { bg: "rgba(255,213,10,0.12)", fg: "#ffd60a", label: "참고" }, low: { bg: "#1a1a1a", fg: "#888", label: "일반" } };
-    // portfolio 순서로 전체 표시 (뉴스 없는 티커도 갱신 버튼 노출)
+    const TICKER_BG = (typeof TICKER_COLOR !== "undefined" && TICKER_COLOR) || {};
     const portfolioOrder = (portfolio || []).map(p => p.ticker);
-    const tickers = portfolioOrder;
+    // 전체 보유 종목의 뉴스를 평탄화 → 시간/중요도 윈도우로 필터 → 통합 정렬
+    const allNews = [];
+    portfolioOrder.forEach(tk => {
+      const pos = (portfolio || []).find(p => p.ticker === tk);
+      (SN[tk] || []).forEach(n => {
+        if (!n.date) return;
+        const d = new Date(n.date);
+        const ageMs = now.getTime() - d.getTime();
+        if (ageMs > cutoff || ageMs < -dayMs * 2) return;
+        const ok = newsRange === "today" ? n.importance === "high" : n.importance !== "low";
+        if (!ok) return;
+        allNews.push({ n: n, ticker: tk, name: pos ? pos.name : tk, sector: pos ? pos.sector : "" });
+      });
+    });
+    // 중요도 우선 → 최신순
+    const impRank = { high: 0, medium: 1, low: 2 };
+    allNews.sort((a, b) => {
+      const ra = impRank[a.n.importance] != null ? impRank[a.n.importance] : 3;
+      const rb = impRank[b.n.importance] != null ? impRank[b.n.importance] : 3;
+      if (ra !== rb) return ra - rb;
+      return new Date(b.n.date) - new Date(a.n.date);
+    });
+    // 종목별 갱신 통계 (전체 갱신 버튼용)
+    const anyLoading = portfolioOrder.some(tk => !!tickerNewsLoading[tk]);
+    const errCount = portfolioOrder.filter(tk => !!tickerNewsError[tk]).length;
+    const refreshAll = () => {
+      portfolioOrder.forEach(tk => {
+        if (tickerNewsLoading[tk]) return;
+        const pos = (portfolio || []).find(p => p.ticker === tk);
+        refreshTickerNews(tk, pos ? pos.name : tk);
+      });
+    };
     return /*#__PURE__*/React.createElement("div", {
       style: { background: "#111", borderRadius: 14, padding: "14px 16px", marginBottom: 20 }
     },
       /*#__PURE__*/React.createElement("div", {
-        style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }
+        style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8 }
       },
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#ccc" } }, "📰 100억 뉴스"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#555" } }, "최종갱신: ", ref.toLocaleDateString("ko-KR"))
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#ccc" } }, "🔥 100억 핫뉴스"),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#555" } }, "최종갱신: ", ref.toLocaleDateString("ko-KR")),
+          /*#__PURE__*/React.createElement("button", {
+            onClick: refreshAll,
+            disabled: anyLoading || portfolioOrder.length === 0,
+            title: "보유 종목 전체 뉴스 갱신",
+            style: {
+              background: anyLoading ? "#1a1a1a" : "rgba(0,200,5,0.14)",
+              border: `1px solid ${anyLoading ? "#222" : "#00c80555"}`,
+              color: anyLoading ? "#555" : "#00c805",
+              fontSize: 10, fontWeight: 700,
+              padding: "3px 9px", borderRadius: 6,
+              cursor: anyLoading || portfolioOrder.length === 0 ? "default" : "pointer",
+              fontFamily: "inherit", transition: "all 0.15s"
+            }
+          }, anyLoading ? "갱신중…" : "↻ 모두 갱신")
+        )
       ),
       /*#__PURE__*/React.createElement("div", {
         style: { display: "flex", gap: 6, marginBottom: 14, background: "#0a0a0a", padding: 4, borderRadius: 10 }
@@ -4910,96 +4963,59 @@ JSON 배열만 반환 (마크다운 금지):
           }
         }, b.label))
       ),
-      tickers.length === 0 && /*#__PURE__*/React.createElement("div", {
+      // 요약 줄: N건 / 중요 N건 / 에러 N건
+      /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 11, color: "#666", marginBottom: 10, display: "flex", gap: 10, flexWrap: "wrap" }
+      },
+        /*#__PURE__*/React.createElement("span", null, rangeLabel, " 핫뉴스 ", /*#__PURE__*/React.createElement("b", { style: { color: "#bbb" } }, allNews.length), "건"),
+        allNews.filter(x => x.n.importance === "high").length > 0 && /*#__PURE__*/React.createElement("span", { style: { color: R } },
+          "● 중요 ", allNews.filter(x => x.n.importance === "high").length, "건"
+        ),
+        errCount > 0 && /*#__PURE__*/React.createElement("span", { style: { color: "#ff8800" } },
+          "⚠ 갱신실패 ", errCount, "종목"
+        )
+      ),
+      portfolioOrder.length === 0 && /*#__PURE__*/React.createElement("div", {
         style: { textAlign: "center", padding: "30px 0", color: "#666", fontSize: 13 }
       }, "📭 포트폴리오에 종목이 없습니다"),
-      tickers.map(tk => {
-        const pos = (portfolio || []).find(p => p.ticker === tk);
-        const items = (SN[tk] || [])
-          .filter(n => {
-            if (!n.date) return false;
-            const d = new Date(n.date);
-            return (now.getTime() - d.getTime()) <= cutoff && (now.getTime() - d.getTime()) >= -dayMs * 2; // 미래 이벤트(D-DAY)도 2일까지 허용
-          })
-          .filter(n => newsRange === "today" ? n.importance === "high" : n.importance !== "low")
-          .sort((a, b) => new Date(b.date) - new Date(a.date));
-        const loading = !!tickerNewsLoading[tk];
-        const err = tickerNewsError[tk];
-        const refreshedAt = tickerNewsRefreshed[tk];
-        const refreshedLabel = refreshedAt ? new Date(refreshedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : null;
+      portfolioOrder.length > 0 && allNews.length === 0 && /*#__PURE__*/React.createElement("div", {
+        style: { textAlign: "center", padding: "30px 0", color: "#555", fontSize: 12 }
+      }, "📭 ", rangeLabel, " 핫뉴스 없음 — '↻ 모두 갱신'으로 최신 뉴스를 불러오세요"),
+      allNews.map((row, i) => {
+        const n = row.n;
+        const imp = IMP[n.importance] || IMP.low;
+        const d = new Date(n.date);
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        const tkColor = TICKER_BG[row.ticker] || "#444";
         return /*#__PURE__*/React.createElement("div", {
-          key: tk,
-          style: { marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #1a1a1a" }
+          key: i,
+          style: { marginBottom: 12, paddingBottom: 12, paddingLeft: 10, borderLeft: `2px solid ${imp.fg}66`, borderBottom: i < allNews.length - 1 ? "1px solid #1a1a1a" : "none" }
         },
           /*#__PURE__*/React.createElement("div", {
-            style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }
+            style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }
           },
-            /*#__PURE__*/React.createElement("div", {
-              style: { fontSize: 14, fontWeight: 700, color: "#fff" }
-            }, tk),
-            pos && /*#__PURE__*/React.createElement("div", {
-              style: { fontSize: 11, color: "#888" }
-            }, pos.name, " · ", pos.sector),
-            /*#__PURE__*/React.createElement("div", {
-              style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }
-            },
-              refreshedLabel && /*#__PURE__*/React.createElement("span", {
-                style: { fontSize: 10, color: "#00c805" }
-              }, "⟳ ", refreshedLabel),
-              /*#__PURE__*/React.createElement("span", {
-                style: { fontSize: 10, color: "#555", background: "#1a1a1a", padding: "2px 7px", borderRadius: 6 }
-              }, items.length, "건"),
-              /*#__PURE__*/React.createElement("button", {
-                onClick: () => refreshTickerNews(tk, pos ? pos.name : tk),
-                disabled: loading,
-                title: `${tk} 뉴스 현재기준 갱신`,
-                style: {
-                  background: loading ? "#1a1a1a" : "rgba(0,200,5,0.14)",
-                  border: `1px solid ${loading ? "#222" : "#00c80555"}`,
-                  color: loading ? "#555" : "#00c805",
-                  fontSize: 10, fontWeight: 700,
-                  padding: "3px 9px", borderRadius: 6,
-                  cursor: loading ? "default" : "pointer",
-                  fontFamily: "inherit", transition: "all 0.15s"
-                }
-              }, loading ? "갱신중…" : "↻ 갱신")
-            )
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 11, fontWeight: 800, color: "#fff", background: tkColor, borderRadius: 5, padding: "2px 8px", letterSpacing: -0.2 }
+            }, row.ticker),
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 10, background: imp.bg, color: imp.fg, borderRadius: 5, padding: "1px 6px", fontWeight: 700 }
+            }, imp.label),
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 11, color: "#555" }
+            }, dateStr),
+            row.sector && /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 10, color: "#666" }
+            }, "· ", row.sector)
           ),
-          err && /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: 11, color: "#ff5000", marginBottom: 8, padding: "6px 10px", background: "rgba(255,80,0,0.08)", borderRadius: 6 }
-          }, "⚠️ ", err),
-          items.length === 0 && !err && !loading && /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: 11, color: "#555", padding: "8px 10px", fontStyle: "italic" }
-          }, rangeLabel, " 범위 뉴스 없음 — 갱신 버튼을 눌러 최신 뉴스를 불러오세요"),
-          items.map((n, i) => {
-            const imp = IMP[n.importance] || IMP.low;
-            const d = new Date(n.date);
-            const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-            return /*#__PURE__*/React.createElement("div", {
-              key: i,
-              style: { marginBottom: 10, paddingLeft: 10, borderLeft: `2px solid ${imp.fg}44` }
-            },
-              /*#__PURE__*/React.createElement("div", {
-                style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }
-              },
-                /*#__PURE__*/React.createElement("span", {
-                  style: { fontSize: 10, background: imp.bg, color: imp.fg, borderRadius: 5, padding: "1px 6px", fontWeight: 700 }
-                }, imp.label),
-                /*#__PURE__*/React.createElement("span", {
-                  style: { fontSize: 11, color: "#555" }
-                }, dateStr)
-              ),
-              /*#__PURE__*/React.createElement("div", {
-                style: { fontSize: 13, color: "#ddd", fontWeight: 600, lineHeight: 1.4, marginBottom: 3 }
-              }, n.title),
-              /*#__PURE__*/React.createElement("div", {
-                style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 3 }
-              }, n.detail),
-              n.source && /*#__PURE__*/React.createElement("div", {
-                style: { fontSize: 10, color: "#555" }
-              }, "— ", n.source)
-            );
-          })
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 13, color: "#ddd", fontWeight: 600, lineHeight: 1.4, marginBottom: 3 }
+          }, n.title),
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 3 }
+          }, n.detail),
+          n.source && /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 10, color: "#555" }
+          }, "— ", n.source)
         );
       })
     );
@@ -5245,7 +5261,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-04-26 chart-currency-toggle */
+/* build:2026-04-26 splash-grow */
 </script>
 </body>
 </html>
