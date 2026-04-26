@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v1.2026-04-20";
+const CACHE_VERSION = "v4.2026-04-26-auto-update";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 
@@ -15,12 +15,11 @@ const SHELL_FILES = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icon-192.png",
-  "./icon-512.png",
-  "./icon-512-maskable.png"
+  "./icon-192.png?v=2",
+  "./icon-512.png?v=2",
+  "./icon-512-maskable.png?v=2"
 ];
 
-// Hosts for which responses should NEVER be cached (live market data, AI responses)
 const LIVE_API_HOSTS = [
   "api.anthropic.com",
   "finnhub.io",
@@ -30,7 +29,6 @@ const LIVE_API_HOSTS = [
   "stooq.com"
 ];
 
-// CDN hosts eligible for stale-while-revalidate
 const CDN_HOSTS = [
   "unpkg.com",
   "cdn.jsdelivr.net",
@@ -40,7 +38,6 @@ const CDN_HOSTS = [
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(SHELL_CACHE).then(cache => {
-      // Tolerate individual failures (e.g. if an icon is missing) — don't fail install
       return Promise.all(
         SHELL_FILES.map(url =>
           cache.add(url).catch(err => console.warn("[SW] precache skip", url, err.message))
@@ -62,26 +59,45 @@ self.addEventListener("activate", event => {
 
 self.addEventListener("fetch", event => {
   const req = event.request;
-  if (req.method !== "GET") return; // Don't touch POST (Claude API uses POST)
-
+  if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // Never cache live market/AI data — always hit network
-  if (LIVE_API_HOSTS.some(h => url.hostname.endsWith(h))) {
-    return; // let the browser handle it natively
-  }
+  if (LIVE_API_HOSTS.some(h => url.hostname.endsWith(h))) return;
 
-  // Navigation requests: network-first with cached index.html fallback
+  // Navigation: network-first (no-store), cached fallback
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(() =>
-        caches.match("./index.html").then(r => r || caches.match("./"))
-      )
+      fetch(req, { cache: "no-store" })
+        .then(resp => {
+          if (resp && resp.status === 200) {
+            const clone = resp.clone();
+            caches.open(SHELL_CACHE).then(c => c.put("./index.html", clone)).catch(()=>{});
+          }
+          return resp;
+        })
+        .catch(() => caches.match("./index.html").then(r => r || caches.match("./")))
     );
     return;
   }
 
-  // CDN scripts: stale-while-revalidate
+  // index.html / "/" 직접 요청도 network-first
+  if (url.origin === self.location.origin &&
+      (url.pathname.endsWith("/index.html") || url.pathname.endsWith("/"))) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" })
+        .then(resp => {
+          if (resp && resp.status === 200) {
+            const clone = resp.clone();
+            caches.open(SHELL_CACHE).then(c => c.put(req, clone)).catch(()=>{});
+          }
+          return resp;
+        })
+        .catch(() => caches.match(req).then(r => r || caches.match("./index.html")))
+    );
+    return;
+  }
+
+  // CDN: stale-while-revalidate
   if (CDN_HOSTS.some(h => url.hostname.endsWith(h))) {
     event.respondWith(
       caches.open(CDN_CACHE).then(cache =>
@@ -113,11 +129,8 @@ self.addEventListener("fetch", event => {
     );
     return;
   }
-
-  // Anything else: pass through to network
 });
 
-// Allow the page to trigger an update check manually (optional)
 self.addEventListener("message", event => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
