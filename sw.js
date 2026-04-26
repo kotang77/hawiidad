@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v5.2026-04-26-splash-grow";
+const CACHE_VERSION = "v7.2026-04-26-unified-settings";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 
@@ -133,4 +133,3 @@ self.addEventListener("fetch", event => {
 
 self.addEventListener("message", event => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
-});

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<title>하와이백억아빠 투자가이드</title>
+<title>부의확신</title>
 <!-- ===== PWA ===== -->
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#0a0a0a">
@@ -11,13 +11,13 @@
 <!-- iOS / Safari -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="100억 투자">
+<meta name="apple-mobile-web-app-title" content="부의확신">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
 <!-- Android Chrome / Samsung Internet -->
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="application-name" content="100억 투자">
+<meta name="application-name" content="부의확신">
 <style>html,body{background:#0a0a0a;overscroll-behavior-y:contain;}
 @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }</style>
 <script>
@@ -420,7 +420,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 #splash-intro{
   position:fixed; inset:0; z-index:99999;
   display:flex; align-items:center; justify-content:center;
-  background:#ffffff;
+  background:#faf6ec;
   animation: splashFadeOut 0.3s ease 2s forwards;
 }
 #splash-intro .splash-logo{
@@ -1358,6 +1358,26 @@ function App() {
     return (typeof s.appTitle === "string" && s.appTitle.trim()) ? s.appTitle : "투자 비서";
   });
   const [editingTitle, setEditingTitle] = useState(false);
+  // ===== 사용자 프로필 (통합 ⚙️ 설정) =====
+  // userName: 헤더 표시 + 추천 프롬프트 사용자 식별
+  // userWatchlist: 관심 종목 티커 배열 — zero-to-one 추천에 가중치
+  // userSectors: 관심 섹터 한글 배열 — 신규픽 섹터 보강에 가중치
+  const [userName, setUserName] = useState(() => {
+    const s = loadUserSettings();
+    return (typeof s.userName === "string" && s.userName.trim()) ? s.userName : "";
+  });
+  const [userWatchlist, setUserWatchlist] = useState(() => {
+    const s = loadUserSettings();
+    return Array.isArray(s.userWatchlist) ? s.userWatchlist.filter(t => typeof t === "string" && t.trim()) : [];
+  });
+  const [userSectors, setUserSectors] = useState(() => {
+    const s = loadUserSettings();
+    return Array.isArray(s.userSectors) ? s.userSectors.filter(t => typeof t === "string" && t.trim()) : [];
+  });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [watchInputDraft, setWatchInputDraft] = useState("");
+  const [sectorInputDraft, setSectorInputDraft] = useState("");
   const [currency, setCurrency] = useState(() => {
     try {
       const v = localStorage.getItem("displayCurrency");
@@ -1565,10 +1585,10 @@ function App() {
       saveLivePricesCache(livePrices, liveChanges);
     }
   }, [livePrices, liveChanges]);
-  // 사용자 설정(제목·목표·마감일·성장률) 변경 시 자동 저장
+  // 사용자 설정(제목·목표·마감일·성장률·프로필) 변경 시 자동 저장
   useEffect(() => {
-    saveUserSettings({ appTitle, goal, deadline, stockRates });
-  }, [appTitle, goal, deadline, stockRates]);
+    saveUserSettings({ appTitle, goal, deadline, stockRates, userName, userWatchlist, userSectors });
+  }, [appTitle, goal, deadline, stockRates, userName, userWatchlist, userSectors]);
   const getPrice = useCallback(s => livePrices[s.ticker] ?? s.price, [livePrices]);
   const rate = manualRate || usdKrw;
   // 통화 토글에 따라 USD 또는 원화로 표기 (rate 없으면 USD로 fallback)
@@ -2048,12 +2068,16 @@ ${newsCtx || "-"}
         return (e.getFullYear() - n.getFullYear()) * 12 + (e.getMonth() - n.getMonth());
       })());
       const requiredCAGR = totalV > 0 ? (Math.pow(goal / totalV, 12 / Math.max(1, monthsLeft)) - 1) * 100 : 0;
+      const userPrefLine = (userWatchlist && userWatchlist.length)
+        ? `\n- 사용자 관심 종목: ${userWatchlist.join(", ")} (newPicks 후보 우선 검토)` : "";
+      const userSectorLine = (userSectors && userSectors.length)
+        ? `\n- 사용자 관심 섹터: ${userSectors.join(", ")} (newPicks 섹터 가중)` : "";
       const system = `당신은 피터 틸 '제로투원' 철학으로 미국 주식 포트폴리오를 코칭하는 전문가입니다.
-- 사용자는 한국인 장기투자자(USD 자산, 원화 기반)
+- 사용자는 한국인 장기투자자(USD 자산, 원화 기반)${userName ? " · 호칭: " + userName : ""}
 - 목표: ${deadline}까지 ${Math.round(goal).toLocaleString()} USD
 - 현재 평가금액: ${Math.round(totalV).toLocaleString()} USD (${(totalV/goal*100).toFixed(1)}% 달성)
 - 남은기간: ${monthsLeft}개월
-- 필요 연평균수익률(CAGR): 약 ${requiredCAGR.toFixed(1)}%
+- 필요 연평균수익률(CAGR): 약 ${requiredCAGR.toFixed(1)}%${userPrefLine}${userSectorLine}
 반드시 유효한 JSON만 반환 (코드펜스/설명 금지). 스키마:
 {
   "summary": "이번 달 핵심 전략 1~2문장",
@@ -2067,7 +2091,8 @@ ${newsCtx || "-"}
 규칙:
 - rebalance: 현재 보유 종목 전체에 대해 평가
 - newPicks: 2~3개 (목표달성에 부족한 섹터/모멘텀을 보강할 신규 종목, 제로투원 독점 기준)
-- 비중 합이 100% 근처가 되도록 조정 (rebalance.target + newPicks.target)`;
+- 비중 합이 100% 근처가 되도록 조정 (rebalance.target + newPicks.target)
+- **사용자 관심 종목/섹터가 명시되어 있다면 newPicks에 우선 반영하되, 제로투원 기준(독점·해자·모멘텀)을 충족하지 않으면 사유와 함께 제외**`;
       const userMsg = `[현재 포트폴리오]\n${pfSummary}\n\n위 정보를 바탕으로 이번 달 목표 달성 전략을 JSON으로 산출해주세요.`;
       const data = await callClaude({
         model: "claude-sonnet-4-5",
@@ -2102,7 +2127,7 @@ ${newsCtx || "-"}
     } finally {
       setGoalStratLoading(false);
     }
-  }, [portfolio, getPrice, goal, deadline]);
+  }, [portfolio, getPrice, goal, deadline, userName, userWatchlist, userSectors]);
   // sim 탭 진입 시 캐시 미존재면 자동 로드 (이번 달 캐시는 그대로 사용)
   useEffect(() => {
     if (tab === "sim" && !goalStrategy && !goalStratLoading) {
@@ -2289,6 +2314,8 @@ ${newsCtx || "-"}
           model: "claude-sonnet-4-6",
           max_tokens: 2500,
           system: `당신은 미국 주식 ${ticker}에 대해 피터 틸 '제로투원' 독점 기준의 평가와 보수/중립/낙관 시나리오 근거를 동시에 산출하는 분석가입니다.
+${(userWatchlist && userWatchlist.length) ? `사용자 관심 종목: ${userWatchlist.join(", ")}` : ""}
+${(userSectors && userSectors.length) ? `사용자 관심 섹터: ${userSectors.join(", ")} (해당 섹터면 가중 분석)` : ""}
 JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
 형식:
 {
@@ -2901,7 +2928,7 @@ JSON 배열만 반환 (마크다운 금지):
       margin: "0 auto",
       position: "relative"
     }
-  }, showGoalModal && /*#__PURE__*/React.createElement("div", {
+  }, showSettingsModal && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
       inset: 0,
@@ -2909,13 +2936,17 @@ JSON 배열만 반환 (마크다운 금지):
       zIndex: 300,
       display: "flex",
       alignItems: "flex-end"
-    }
+    },
+    onClick: () => setShowSettingsModal(false)
   }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
     style: {
       width: "100%",
       background: "#1a1a1a",
       borderRadius: "24px 24px 0 0",
-      padding: "24px 20px 32px"
+      padding: "20px 20px 28px",
+      maxHeight: "92vh",
+      overflowY: "auto"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2923,130 +2954,263 @@ JSON 배열만 반환 (마크다운 금지):
       height: 4,
       background: "#333",
       borderRadius: 2,
-      margin: "0 auto 20px"
+      margin: "0 auto 16px"
     }
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 18,
-      fontWeight: 700,
-      marginBottom: 20
-    }
-  }, "\uBAA9\uD45C \uC124\uC815"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: "#666",
-      marginBottom: 6
-    }
-  }, "\uBAA9\uD45C \uAE08\uC561 (\uB2EC\uB7EC)"), /*#__PURE__*/React.createElement("div", {
-    style: {
       display: "flex",
+      justifyContent: "space-between",
       alignItems: "center",
-      gap: 8,
-      background: "#111",
-      borderRadius: 12,
-      padding: "12px 16px"
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    value: goalInput,
-    onChange: e => setGoalInput(e.target.value),
-    placeholder: "7",
-    style: {
-      flex: 1,
-      background: "none",
-      border: "none",
-      color: "#fff",
-      fontSize: 24,
-      fontWeight: 700,
-      outline: "none",
-      fontFamily: "inherit"
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 18,
-      color: "#666"
-    }
-  }, "M USD")), goalInput && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: "#666",
-      marginTop: 6
-    }
-  }, fmt(parseFloat(goalInput) * 1e6), rate ? " · " + fmtKRW(parseFloat(goalInput) * 1e6, rate) : "")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: 24
+      marginBottom: 18
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 18, fontWeight: 700 }
+  }, "\u2699 \uD504\uB85C\uD544 & \uBAA9\uD45C \uC124\uC815"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowSettingsModal(false),
     style: {
-      fontSize: 12,
-      color: "#666",
-      marginBottom: 6
+      background: "none", border: "none", color: "#888",
+      fontSize: 22, cursor: "pointer", padding: 0, width: 28, height: 28
     }
-  }, "\uBAA9\uD45C \uAE30\uD55C"), /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    value: deadlineInput,
-    onChange: e => setDeadlineInput(e.target.value),
-    style: {
-      width: "100%",
-      background: "#111",
-      border: "none",
-      borderRadius: 12,
-      color: "#fff",
-      fontSize: 16,
-      fontWeight: 600,
-      padding: "14px 16px",
-      fontFamily: "inherit",
-      outline: "none",
-      colorScheme: "dark",
-      boxSizing: "border-box"
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setGoal(DEFAULT_GOAL);
-      setDeadline(DEFAULT_DEADLINE);
-      setShowGoalModal(false);
+  }, "\u00D7")),
+  // 아이디
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginBottom: 6, fontWeight: 600 } }, "\uC544\uC774\uB514 (\uD638\uCE6D)"),
+    /*#__PURE__*/React.createElement("input", {
+      type: "text",
+      value: nameInput,
+      onChange: e => setNameInput(e.target.value),
+      placeholder: "\uC608) \uD558\uC640\uC774 \uBC31\uC5B5\uC544\uBE60",
+      style: {
+        width: "100%", background: "#111", border: "none", borderRadius: 12,
+        color: "#fff", fontSize: 15, fontWeight: 600,
+        padding: "12px 14px", fontFamily: "inherit", outline: "none",
+        boxSizing: "border-box"
+      }
+    })
+  ),
+  // 목표 금액
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginBottom: 6, fontWeight: 600 } }, "\uBAA9\uD45C \uAE08\uC561 (\uB2EC\uB7EC)"),
+    /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex", alignItems: "center", gap: 8,
+        background: "#111", borderRadius: 12, padding: "10px 14px"
+      }
     },
-    style: {
-      flex: 1,
-      background: "#222",
-      border: "none",
-      borderRadius: 12,
-      color: "#888",
-      padding: "14px",
-      fontSize: 15,
-      fontWeight: 600,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    }
-  }, "\uAE30\uBCF8\uAC12"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const g = parseFloat(goalInput) * 1e6;
-      if (!isNaN(g) && g > 0) setGoal(Math.round(g));
-      if (deadlineInput) setDeadline(deadlineInput);
-      setShowGoalModal(false);
+      /*#__PURE__*/React.createElement("input", {
+        type: "number",
+        value: goalInput,
+        onChange: e => setGoalInput(e.target.value),
+        placeholder: "7",
+        style: {
+          flex: 1, background: "none", border: "none",
+          color: "#fff", fontSize: 22, fontWeight: 700, outline: "none", fontFamily: "inherit"
+        }
+      }),
+      /*#__PURE__*/React.createElement("span", { style: { fontSize: 16, color: "#666" } }, "M USD")
+    ),
+    goalInput && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: "#666", marginTop: 4 }
+    }, fmt(parseFloat(goalInput) * 1e6), rate ? " · " + fmtKRW(parseFloat(goalInput) * 1e6, rate) : "")
+  ),
+  // 목표 기한
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginBottom: 6, fontWeight: 600 } }, "\uBAA9\uD45C \uAE30\uD55C"),
+    /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      value: deadlineInput,
+      onChange: e => setDeadlineInput(e.target.value),
+      style: {
+        width: "100%", background: "#111", border: "none", borderRadius: 12,
+        color: "#fff", fontSize: 15, fontWeight: 600,
+        padding: "12px 14px", fontFamily: "inherit", outline: "none",
+        colorScheme: "dark", boxSizing: "border-box"
+      }
+    })
+  ),
+  // 환율 수동 입력
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }
     },
-    style: {
-      flex: 2,
-      background: G,
-      border: "none",
-      borderRadius: 12,
-      color: "#000",
-      padding: "14px",
-      fontSize: 15,
-      fontWeight: 700,
-      cursor: "pointer",
-      fontFamily: "inherit"
-    }
-  }, "\uC800\uC7A5")))), showEditModal && /*#__PURE__*/React.createElement("div", {
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", fontWeight: 600 } }, "\uD658\uC728 \uC218\uB3D9 \uC785\uB825 (\uC120\uD0DD)"),
+      manualRate && /*#__PURE__*/React.createElement("button", {
+        onClick: () => setManualRate(null),
+        style: {
+          background: "none", border: "none", color: G,
+          fontSize: 11, cursor: "pointer", padding: 0
+        }
+      }, "\u21BA \uC790\uB3D9 \uBCF5\uADC0")
+    ),
+    /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex", alignItems: "center", gap: 8,
+        background: "#111", borderRadius: 12, padding: "10px 14px"
+      }
+    },
+      /*#__PURE__*/React.createElement("span", { style: { fontSize: 14, color: "#666" } }, "\u20A9"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "number",
+        value: rateInput,
+        onChange: e => setRateInput(e.target.value),
+        placeholder: String(Math.round(usdKrw || 1370)),
+        style: {
+          flex: 1, background: "none", border: "none",
+          color: "#fff", fontSize: 16, fontWeight: 700, outline: "none",
+          fontFamily: "inherit", textAlign: "right"
+        }
+      })
+    )
+  ),
+  // 관심 종목 (티커)
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginBottom: 6, fontWeight: 600 } },
+      "\uAD00\uC2EC \uC885\uBAA9 (\uD2F0\uCEE4 \uC785\uB825 \u2192 Enter)"),
+    /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "#111", borderRadius: 12, padding: "10px 12px",
+        display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center"
+      }
+    },
+      ...userWatchlist.map((t, i) =>
+        /*#__PURE__*/React.createElement("span", {
+          key: "w-" + i,
+          style: {
+            background: "#222", color: G, fontSize: 12, fontWeight: 700,
+            padding: "5px 9px", borderRadius: 999, display: "inline-flex",
+            alignItems: "center", gap: 4
+          }
+        }, t,
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => setUserWatchlist(userWatchlist.filter((_, j) => j !== i)),
+            style: {
+              background: "none", border: "none", color: "#888",
+              cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1
+            }
+          }, "\u00D7")
+        )
+      ),
+      /*#__PURE__*/React.createElement("input", {
+        type: "text",
+        value: watchInputDraft,
+        onChange: e => setWatchInputDraft(e.target.value.toUpperCase()),
+        onKeyDown: e => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            const v = watchInputDraft.trim().replace(/[,\s]/g, "");
+            if (v && !userWatchlist.includes(v)) setUserWatchlist([...userWatchlist, v]);
+            setWatchInputDraft("");
+          } else if (e.key === "Backspace" && !watchInputDraft && userWatchlist.length > 0) {
+            setUserWatchlist(userWatchlist.slice(0, -1));
+          }
+        },
+        placeholder: userWatchlist.length === 0 ? "NVDA, TSLA, PLTR…" : "",
+        style: {
+          flex: 1, minWidth: 80, background: "none", border: "none",
+          color: "#fff", fontSize: 13, outline: "none", fontFamily: "inherit"
+        }
+      })
+    )
+  ),
+  // 관심 섹터
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 20 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#888", marginBottom: 6, fontWeight: 600 } },
+      "\uAD00\uC2EC \uC139\uD130 (\uD55C\uAE00, Enter\uB85C \uCD94\uAC00)"),
+    /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "#111", borderRadius: 12, padding: "10px 12px",
+        display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center"
+      }
+    },
+      ...userSectors.map((s, i) =>
+        /*#__PURE__*/React.createElement("span", {
+          key: "s-" + i,
+          style: {
+            background: "#222", color: "#ffd60a", fontSize: 12, fontWeight: 700,
+            padding: "5px 9px", borderRadius: 999, display: "inline-flex",
+            alignItems: "center", gap: 4
+          }
+        }, s,
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => setUserSectors(userSectors.filter((_, j) => j !== i)),
+            style: {
+              background: "none", border: "none", color: "#888",
+              cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1
+            }
+          }, "\u00D7")
+        )
+      ),
+      /*#__PURE__*/React.createElement("input", {
+        type: "text",
+        value: sectorInputDraft,
+        onChange: e => setSectorInputDraft(e.target.value),
+        onKeyDown: e => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            const v = sectorInputDraft.trim().replace(/,$/, "");
+            if (v && !userSectors.includes(v)) setUserSectors([...userSectors, v]);
+            setSectorInputDraft("");
+          } else if (e.key === "Backspace" && !sectorInputDraft && userSectors.length > 0) {
+            setUserSectors(userSectors.slice(0, -1));
+          }
+        },
+        placeholder: userSectors.length === 0 ? "AI \uBC18\uB3C4\uCCB4, \uC591\uC790\uCEF4\uD4E8\uD305, \uC2A4\uD14C\uC774\uBE14\uCF54\uC778\u2026" : "",
+        style: {
+          flex: 1, minWidth: 80, background: "none", border: "none",
+          color: "#fff", fontSize: 13, outline: "none", fontFamily: "inherit"
+        }
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 10, color: "#555", marginTop: 6, lineHeight: 1.4 }
+    }, "\u203B \uAD00\uC2EC \uC885\uBAA9/\uC139\uD130\uB294 \uC81C\uB85C\uD22C\uC6D0 \uC2E0\uADDC \uCD94\uCC9C\uACFC \uBAA9\uD45C \uB2EC\uC131 \uC804\uB7B5\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4")
+  ),
+  // 버튼
+  /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setNameInput("");
+        setUserName("");
+        setGoal(DEFAULT_GOAL);
+        setDeadline(DEFAULT_DEADLINE);
+        setUserWatchlist([]);
+        setUserSectors([]);
+        setManualRate(null);
+        setShowSettingsModal(false);
+      },
+      style: {
+        flex: 1, background: "#222", border: "none", borderRadius: 12,
+        color: "#888", padding: "13px",
+        fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+      }
+    }, "\uAE30\uBCF8\uAC12"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setUserName(nameInput.trim());
+        const g = parseFloat(goalInput) * 1e6;
+        if (!isNaN(g) && g > 0) setGoal(Math.round(g));
+        if (deadlineInput) setDeadline(deadlineInput);
+        const r = parseFloat(rateInput);
+        if (!isNaN(r) && r > 0) setManualRate(r);
+        // 미확정 chip draft도 합쳐서 저장
+        if (watchInputDraft.trim()) {
+          const v = watchInputDraft.trim().toUpperCase().replace(/[,\s]/g, "");
+          if (v && !userWatchlist.includes(v)) setUserWatchlist([...userWatchlist, v]);
+        }
+        if (sectorInputDraft.trim()) {
+          const v = sectorInputDraft.trim().replace(/,$/, "");
+          if (v && !userSectors.includes(v)) setUserSectors([...userSectors, v]);
+        }
+        setShowSettingsModal(false);
+      },
+      style: {
+        flex: 2, background: G, border: "none", borderRadius: 12,
+        color: "#000", padding: "13px",
+        fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit"
+      }
+    }, "\uC800\uC7A5")
+  )
+  )), showEditModal && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "absolute",
       inset: 0,
@@ -3328,106 +3492,23 @@ JSON 배열만 반환 (마크다운 금지):
       alignItems: "center",
       marginBottom: 20
     }
-  }, editingTitle ? /*#__PURE__*/React.createElement("input", {
-    ref: titleInputRef,
-    value: appTitle,
-    onChange: e => setAppTitle(e.target.value),
-    onBlur: () => setEditingTitle(false),
-    onKeyDown: e => {
-      if (e.key === "Enter" || e.key === "Escape") setEditingTitle(false);
-    },
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 18,
       fontWeight: 700,
-      background: "none",
-      border: "none",
-      borderBottom: "1px solid #333",
       color: "#fff",
       fontFamily: "inherit",
-      outline: "none",
-      width: 160
+      letterSpacing: -0.2
     }
-  }) : /*#__PURE__*/React.createElement("button", {
-    onClick: () => setEditingTitle(true),
-    style: {
-      fontSize: 18,
-      fontWeight: 700,
-      background: "none",
-      border: "none",
-      color: "#fff",
-      cursor: "pointer",
-      padding: 0,
-      fontFamily: "inherit"
-    }
-  }, appTitle, " ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: "#444"
-    }
-  }, "\u270E")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "right"
-    }
-  }, editingRate ? /*#__PURE__*/React.createElement("div", {
+  }, userName ? userName + "\uB2D8" : appTitle), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 6
+      gap: 8
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: "#666"
-    }
-  }, "\u20A9"), /*#__PURE__*/React.createElement("input", {
-    ref: rateInputRef,
-    type: "number",
-    value: rateInput,
-    onChange: e => setRateInput(e.target.value),
-    onKeyDown: e => {
-      if (e.key === "Enter") {
-        const v = parseFloat(rateInput);
-        if (!isNaN(v) && v > 0) setManualRate(v);
-        setEditingRate(false);
-      }
-      if (e.key === "Escape") setEditingRate(false);
-    },
-    style: {
-      width: 80,
-      background: "#111",
-      border: "1px solid #333",
-      borderRadius: 8,
-      color: "#fff",
-      fontSize: 14,
-      fontWeight: 700,
-      padding: "4px 8px",
-      fontFamily: "inherit",
-      outline: "none",
-      textAlign: "right"
-    }
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const v = parseFloat(rateInput);
-      if (!isNaN(v) && v > 0) setManualRate(v);
-      setEditingRate(false);
-    },
-    style: {
-      background: G,
-      border: "none",
-      borderRadius: 6,
-      color: "#000",
-      fontSize: 12,
-      fontWeight: 700,
-      padding: "4px 8px",
-      cursor: "pointer"
-    }
-  }, "\u2713")) : /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 6
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "right" }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 14,
       fontWeight: 600,
@@ -3441,38 +3522,30 @@ JSON 배열만 반환 (마크다운 금지):
     }
   }, manualRate ? "수동입력" : rateError ? "연결 실패" : rateSource || "연결 중...")), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      setNameInput(userName || "");
+      setGoalInput(String(goal / 1e6));
+      setDeadlineInput(deadline);
       setRateInput(String(Math.round(manualRate || usdKrw || 1370)));
-      setEditingRate(true);
+      setWatchInputDraft("");
+      setSectorInputDraft("");
+      setShowSettingsModal(true);
     },
+    "aria-label": "\uC124\uC815",
     style: {
       background: "#1a1a1a",
-      border: "none",
-      borderRadius: 8,
-      color: "#666",
-      width: 26,
-      height: 26,
+      border: "1px solid #2a2a2a",
+      borderRadius: 10,
+      color: "#bbb",
+      width: 32,
+      height: 32,
       cursor: "pointer",
-      fontSize: 12,
+      fontSize: 16,
       display: "flex",
       alignItems: "center",
-      justifyContent: "center"
+      justifyContent: "center",
+      lineHeight: 1
     }
-  }, "\u270E"), manualRate && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setManualRate(null),
-    style: {
-      background: "#1a1a1a",
-      border: "none",
-      borderRadius: 8,
-      color: G,
-      width: 26,
-      height: 26,
-      cursor: "pointer",
-      fontSize: 12,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center"
-    }
-  }, "\u21BA")))), /*#__PURE__*/React.createElement("div", {
+  }, "\u2699"))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -3546,9 +3619,13 @@ JSON 배열만 반환 (마크다운 금지):
     }
   }, "\uC804\uCCB4 \uC218\uC775")), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
+      setNameInput(userName || "");
       setGoalInput(String(goal / 1e6));
       setDeadlineInput(deadline);
-      setShowGoalModal(true);
+      setRateInput(String(Math.round(manualRate || usdKrw || 1370)));
+      setWatchInputDraft("");
+      setSectorInputDraft("");
+      setShowSettingsModal(true);
     },
     style: {
       width: "100%",
@@ -3677,7 +3754,7 @@ JSON 배열만 반환 (마크다운 금지):
       color: "#fff",
       fontVariantNumeric: "tabular-nums"
     }
-  }, deadline, " \u270E")))), /*#__PURE__*/React.createElement("div", {
+  }, deadline)))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 16,
@@ -3825,15 +3902,15 @@ JSON 배열만 반환 (마크다운 금지):
       style: {
         display: "flex",
         alignItems: "center",
-        gap: 12
+        gap: 8
       }
     }, (() => {
       const srcs = logoSources(stock.ticker);
       const invertFilter = INVERT_LOGO.has(stock.ticker) ? "invert(1) brightness(1.15)" : "none";
       return /*#__PURE__*/React.createElement("div", {
         style: {
-          width: 30,
-          height: 30,
+          width: 28,
+          height: 28,
           borderRadius: "50%",
           display: "flex",
           alignItems: "center",
@@ -5261,7 +5338,8 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-04-26 splash-grow */
+/* build:2026-04-26 unified-settings r1 */
 </script>
 </body>
 </html>
+ 
