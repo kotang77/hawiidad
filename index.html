@@ -5344,4 +5344,17 @@ JSON 배열만 반환 (마크다운 금지):
     }
   }, "\uD0ED \uC9C4\uC785 \uC2DC \uC790\uB3D9 \uBD84\uC11D\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...")))), /*#__PURE__*/React.createElement("style", null, `
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
-        @keyframes bounce{0%,
+        @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+        input::placeholder{color:#333;}
+        input[type=range]{height:4px;border-radius:2px;}
+        ::-webkit-scrollbar{width:0;}
+      `));
+}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+/* build:2026-04-26 unified-settings r1 */
+</script>
+</body>
+</html>
