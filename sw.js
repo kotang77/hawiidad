@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v11.2026-04-29-bright-icons";
+const CACHE_VERSION = "v12.2026-04-29-source-logo";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 
@@ -15,10 +15,10 @@ const SHELL_FILES = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icon-192.png?v=7",
-  "./icon-512.png?v=7",
-  "./icon-512-maskable.png?v=7",
-  "./intro-logo.png?v=7"
+  "./icon-192.png?v=8",
+  "./icon-512.png?v=8",
+  "./icon-512-maskable.png?v=8",
+  "./intro-logo.png?v=8"
 ];
 
 const LIVE_API_HOSTS = [
