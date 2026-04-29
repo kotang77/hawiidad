@@ -6,7 +6,7 @@
 <title>부의확신</title>
 <!-- ===== PWA ===== -->
 <link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="#faf6ec">
 <meta name="description" content="2030년까지 700만불 달성 — 포트폴리오 추적 · 실시간 가격 · AI 분석">
 <!-- iOS / Safari -->
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +18,7 @@
 <!-- Android Chrome / Samsung Internet -->
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="부의확신">
-<style>html,body{background:#0a0a0a;overscroll-behavior-y:contain;}
+<style>html,body{background:#faf6ec;overscroll-behavior-y:contain;}
 @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }</style>
 <script>
   // ── 안전 로깅 헬퍼 (일부 웹뷰에서 console.info 미정의) ──
@@ -409,30 +409,43 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 #err{display:none;position:fixed;inset:0;background:#000;color:#ff5000;padding:24px;font-family:monospace;font-size:13px;white-space:pre-wrap;overflow:auto;z-index:9999;line-height:1.6}
 #err h2{color:#ff5000;font-size:16px;margin-bottom:12px;font-family:-apple-system,sans-serif}
 #err .hint{color:#aaa;font-size:12px;margin-top:16px;font-family:-apple-system,sans-serif}
-#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#666;font-size:14px;background:#000;z-index:1}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#a08a4f;font-size:14px;background:#faf6ec;z-index:1}
 </style>
 </head>
 <body>
 <div id="splash-intro" aria-hidden="true">
-  <img src="./intro-logo.png?v=3" alt="하와이 백억아빠" class="splash-logo" />
+  <img src="./intro-logo.png?v=6" alt="하와이 백억아빠" class="splash-logo" />
+  <div class="splash-title">하와이 백억아빠</div>
 </div>
 <style>
 #splash-intro{
   position:fixed; inset:0; z-index:99999;
-  display:flex; align-items:center; justify-content:center;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:24px;
   background:#faf6ec;
   animation: splashFadeOut 0.3s ease 2s forwards;
 }
 #splash-intro .splash-logo{
-  width:160px; height:160px;
+  width:200px; height:200px;
   object-fit:contain;
   display:block;
   transform-origin: center center;
   animation: splashGrow 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+#splash-intro .splash-title{
+  font-family: 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans CJK KR',sans-serif;
+  font-size: 28px; font-weight: 900; letter-spacing: 1px;
+  color: #e8b933;
+  opacity: 0;
+  animation: splashTitleIn 0.8s ease 0.4s forwards;
+}
 @keyframes splashGrow {
-  from { transform: scale(1); }
-  to   { transform: scale(1.5); }
+  from { transform: scale(0.9); }
+  to   { transform: scale(1.2); }
+}
+@keyframes splashTitleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes splashFadeOut {
   to { opacity:0; visibility:hidden; pointer-events:none; }
@@ -3902,7 +3915,7 @@ JSON 배열만 반환 (마크다운 금지):
       style: {
         display: "flex",
         alignItems: "center",
-        gap: 8
+        gap: 6
       }
     }, (() => {
       const srcs = logoSources(stock.ticker);
@@ -3992,24 +4005,27 @@ JSON 배열만 반환 (마크다운 금지):
         fontSize: 13,
         color: "#bbb",
         fontWeight: 600,
-        letterSpacing: -0.2
+        letterSpacing: -0.2,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis"
       }
     }, Number(stock.shares).toLocaleString() + "\uC8FC (" + weight.toFixed(1) + "%)")), /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "right",
         flexShrink: 0,
-        minWidth: 110,
+        minWidth: 78,
         fontVariantNumeric: "tabular-nums"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: 700,
         whiteSpace: "nowrap"
       }
     }, fmtPriceCur(lp).replace(" USD", "").replace(" 원", "")), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 11,
         color: dayChg != null ? dayChg >= 0 ? G : R : "#555",
         fontWeight: 600
       }
@@ -4017,19 +4033,19 @@ JSON 배열만 반환 (마크다운 금지):
       style: {
         textAlign: "right",
         flexShrink: 0,
-        minWidth: 100,
+        minWidth: 78,
         fontVariantNumeric: "tabular-nums"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: 600,
         color: pnl >= 0 ? G : R,
         whiteSpace: "nowrap"
       }
     }, pnl >= 0 ? "+" : "", fmtCur(pnl).replace(" USD", "").replace(" 원", "").replace(/^-/, "-")), /*#__PURE__*/React.createElement("div", {
       style: {
-        fontSize: 12,
+        fontSize: 11,
         color: pnl >= 0 ? G : R
       }
     }, pctFmt(pnlPct))), /*#__PURE__*/React.createElement("div", {
@@ -4037,12 +4053,12 @@ JSON 배열만 반환 (마크다운 금지):
         background: sig.bg,
         color: sig.color,
         borderRadius: 20,
-        padding: "4px 10px",
-        fontSize: 11,
+        padding: "3px 8px",
+        fontSize: 10,
         fontWeight: 700,
         whiteSpace: "nowrap",
         flexShrink: 0,
-        minWidth: 60,
+        minWidth: 52,
         textAlign: "center"
       }
     }, stock.ticker === "TSL3" ? "즉시매도" : pnlPct > 80 ? "강력매수" : pnlPct > 30 ? "매수" : pnlPct > 0 ? "보유" : "매도검토"))), expanded && /*#__PURE__*/React.createElement("div", {
@@ -5328,18 +5344,4 @@ JSON 배열만 반환 (마크다운 금지):
     }
   }, "\uD0ED \uC9C4\uC785 \uC2DC \uC790\uB3D9 \uBD84\uC11D\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...")))), /*#__PURE__*/React.createElement("style", null, `
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
-        @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
-        input::placeholder{color:#333;}
-        input[type=range]{height:4px;border-radius:2px;}
-        ::-webkit-scrollbar{width:0;}
-      `));
-}
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-04-26 unified-settings r1 */
-</script>
-</body>
-</html>
- 
+        @keyframes bounce{0%,
