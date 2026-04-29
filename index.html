@@ -415,7 +415,6 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 <body>
 <div id="splash-intro" aria-hidden="true">
   <img src="./intro-logo.png?v=6" alt="하와이 백억아빠" class="splash-logo" />
-  <div class="splash-title">하와이 백억아빠</div>
 </div>
 <style>
 #splash-intro{
@@ -432,20 +431,9 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   transform-origin: center center;
   animation: splashGrow 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
-#splash-intro .splash-title{
-  font-family: 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans CJK KR',sans-serif;
-  font-size: 28px; font-weight: 900; letter-spacing: 1px;
-  color: #e8b933;
-  opacity: 0;
-  animation: splashTitleIn 0.8s ease 0.4s forwards;
-}
 @keyframes splashGrow {
   from { transform: scale(0.9); }
   to   { transform: scale(1.2); }
-}
-@keyframes splashTitleIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes splashFadeOut {
   to { opacity:0; visibility:hidden; pointer-events:none; }
@@ -5354,7 +5342,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-04-26 unified-settings r1 */
+/* build:2026-04-29 no-splash-title */
 </script>
 </body>
 </html>
