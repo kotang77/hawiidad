@@ -2033,7 +2033,7 @@ ${newsCtx || "-"}
   }, []);
   // (fetchZeroSearch 제거됨 — 개별 종목 분석 UI 삭제에 따라)
   useEffect(() => {
-    if (tab === "zero" && zeroStocks.length === 0 && !zeroLoading) fetchZeroStocks();
+    if (tab === "ai" && zeroStocks.length === 0 && !zeroLoading) fetchZeroStocks();
   }, [tab]);
   // ===== 목표 달성 전략 (비중조정 + 신규매수) — Claude 호출 =====
   const fetchGoalStrategy = useCallback(async (opts = {}) => {
@@ -4772,7 +4772,79 @@ JSON 배열만 반환 (마크다운 금지):
       lineHeight: 1.85,
       whiteSpace: "pre-wrap"
     }
-  }, aiResponse))), tab === "notes" && /*#__PURE__*/React.createElement("div", null, (() => {
+  }, aiResponse)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "\uC624\uB298\uC758 \uC81C\uB85C\uD22C\uC6D0"), zeroLastFetch && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "#555",
+      marginTop: 2
+    }
+  }, zeroLastFetch.toLocaleString("ko-KR"))), /*#__PURE__*/React.createElement("button", {
+    onClick: fetchZeroStocks,
+    disabled: zeroLoading,
+    style: {
+      background: "#1a1a1a",
+      border: "none",
+      borderRadius: 10,
+      color: zeroLoading ? "#555" : G,
+      padding: "8px 14px",
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: zeroLoading ? "not-allowed" : "pointer",
+      fontFamily: "inherit"
+    }
+  }, zeroLoading ? "\uBD84\uC11D \uC911..." : "\u21BB \uC0C8\uB85C \uBD84\uC11D")), zeroLoading && /*#__PURE__*/React.createElement(Loading, {
+    text: "\uC6F9 \uAC80\uC0C9\uC73C\uB85C \uCD5C\uC2E0 \uC885\uBAA9 \uC120\uBCC4 \uC911..."
+  }), !zeroLoading && zeroError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "rgba(255,80,0,0.08)",
+      borderRadius: 12,
+      padding: "14px 16px",
+      color: R,
+      fontSize: 13
+    }
+  }, zeroError, /*#__PURE__*/React.createElement("button", {
+    onClick: fetchZeroStocks,
+    style: {
+      marginLeft: 10,
+      background: "none",
+      border: "none",
+      color: R,
+      fontSize: 13,
+      cursor: "pointer",
+      textDecoration: "underline"
+    }
+  }, "\uC7AC\uC2DC\uB3C4")), !zeroLoading && zeroStocks.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
+    key: i,
+    s: s,
+    livePrice: livePrices[s.ticker]
+  })), !zeroLoading && zeroStocks.length === 0 && !zeroError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "40px 0",
+      color: "#444"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 32,
+      marginBottom: 10
+    }
+  }, "\uD83C\uDFAF"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14
+    }
+  }, "\uD0ED \uC9C4\uC785 \uC2DC \uC790\uB3D9 \uBD84\uC11D\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4..."))), tab === "notes" && /*#__PURE__*/React.createElement("div", null, (() => {
     const st = notesStore || { notes: [], principles: [], alerts: [] };
     const activeAlerts = (st.alerts || []).filter(a => !a.acknowledged);
     const prioColor = { high: "#ff5000", medium: "#ffd60a", low: "#888" };
@@ -5258,79 +5330,7 @@ JSON 배열만 반환 (마크다운 금지):
         padding: "8px 0"
       }
     }, sectorNews.error)));
-  })()), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 15,
-      fontWeight: 700
-    }
-  }, "\uC624\uB298\uC758 \uC81C\uB85C\uD22C\uC6D0"), zeroLastFetch && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: "#555",
-      marginTop: 2
-    }
-  }, zeroLastFetch.toLocaleString("ko-KR"))), /*#__PURE__*/React.createElement("button", {
-    onClick: fetchZeroStocks,
-    disabled: zeroLoading,
-    style: {
-      background: "#1a1a1a",
-      border: "none",
-      borderRadius: 10,
-      color: zeroLoading ? "#555" : G,
-      padding: "8px 14px",
-      fontSize: 13,
-      fontWeight: 600,
-      cursor: zeroLoading ? "not-allowed" : "pointer",
-      fontFamily: "inherit"
-    }
-  }, zeroLoading ? "\uBD84\uC11D \uC911..." : "\u21BB \uC0C8\uB85C \uBD84\uC11D")), zeroLoading && /*#__PURE__*/React.createElement(Loading, {
-    text: "\uC6F9 \uAC80\uC0C9\uC73C\uB85C \uCD5C\uC2E0 \uC885\uBAA9 \uC120\uBCC4 \uC911..."
-  }), !zeroLoading && zeroError && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "rgba(255,80,0,0.08)",
-      borderRadius: 12,
-      padding: "14px 16px",
-      color: R,
-      fontSize: 13
-    }
-  }, zeroError, /*#__PURE__*/React.createElement("button", {
-    onClick: fetchZeroStocks,
-    style: {
-      marginLeft: 10,
-      background: "none",
-      border: "none",
-      color: R,
-      fontSize: 13,
-      cursor: "pointer",
-      textDecoration: "underline"
-    }
-  }, "\uC7AC\uC2DC\uB3C4")), !zeroLoading && zeroStocks.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
-    key: i,
-    s: s,
-    livePrice: livePrices[s.ticker]
-  })), !zeroLoading && zeroStocks.length === 0 && !zeroError && /*#__PURE__*/React.createElement("div", {
-    style: {
-      textAlign: "center",
-      padding: "40px 0",
-      color: "#444"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 32,
-      marginBottom: 10
-    }
-  }, "\uD83C\uDFAF"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14
-    }
-  }, "\uD0ED \uC9C4\uC785 \uC2DC \uC790\uB3D9 \uBD84\uC11D\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...")))), /*#__PURE__*/React.createElement("style", null, `
+  })()))), /*#__PURE__*/React.createElement("style", null, `
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
         @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
         @keyframes spin{to{transform:rotate(360deg)}}
