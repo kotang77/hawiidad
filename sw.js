@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v16.2026-04-30-zero-to-ai-tab";
+const CACHE_VERSION = "v22.2026-05-01-ta-brand";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 

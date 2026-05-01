@@ -410,45 +410,12 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 #err h2{color:#ff5000;font-size:16px;margin-bottom:12px;font-family:-apple-system,sans-serif}
 #err .hint{color:#aaa;font-size:12px;margin-top:16px;font-family:-apple-system,sans-serif}
 #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#a08a4f;font-size:14px;background:#faf6ec;z-index:1}
+#loading .brand-footer{position:fixed;bottom:24px;left:0;right:0;text-align:center;color:#a08a4f;font-size:10px;letter-spacing:2px;font-weight:600;opacity:0.7;font-family:-apple-system,'Helvetica Neue',sans-serif;}
 </style>
 </head>
 <body>
-<div id="splash-intro" aria-hidden="true">
-  <img src="./intro-logo.png?v=6" alt="하와이 백억아빠" class="splash-logo" />
-</div>
-<style>
-#splash-intro{
-  position:fixed; inset:0; z-index:99999;
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:24px;
-  background:#faf6ec;
-  animation: splashFadeOut 0.3s ease 2s forwards;
-}
-#splash-intro .splash-logo{
-  width:200px; height:200px;
-  object-fit:contain;
-  display:block;
-  transform-origin: center center;
-  animation: splashGrow 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-@keyframes splashGrow {
-  from { transform: scale(0.9); }
-  to   { transform: scale(1.2); }
-}
-@keyframes splashFadeOut {
-  to { opacity:0; visibility:hidden; pointer-events:none; }
-}
-</style>
-<script>
-(function(){
-  // 2초 grow 애니메이션 후 인트로 제거 (fade 0.3s 포함)
-  setTimeout(function(){
-    var s=document.getElementById('splash-intro');
-    if(s){ s.style.display='none'; s.parentNode && s.parentNode.removeChild(s); }
-  }, 2350);
-})();
-</script>
-<div id="loading">로딩 중...</div>
+<!-- splash-intro removed 2026-04-30: 로고 중복 표시 방지 -->
+<div id="loading">로딩 중...<div class="brand-footer">TA 자산운용</div></div>
 <div id="root"></div>
 <div id="err"></div>
 <script>
@@ -1463,8 +1430,17 @@ function App() {
     }
   };
   const [notesStore, setNotesStore] = useState(loadNotesStore);
-  const [noteDraft, setNoteDraft] = useState({ type: "매매원칙", ticker: "", content: "" });
+  const [noteDraft, setNoteDraft] = useState({ type: "매매일지", ticker: "", content: "" });
   const [noteSaveStatus, setNoteSaveStatus] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editNoteDraft, setEditNoteDraft] = useState({ type: "매매일지", ticker: "", content: "" });
+  // ===== 주간 추천 종목 (이번 주 1개) =====
+  const [weeklyPick, setWeeklyPick] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("weekly_pick_v1") || "null"); } catch (e) { return null; }
+  });
+  const [weeklyPickLoading, setWeeklyPickLoading] = useState(false);
+  const [weeklyPickError, setWeeklyPickError] = useState("");
+  const [weeklyPickShowCriteria, setWeeklyPickShowCriteria] = useState(false);
   const [principlesLoading, setPrinciplesLoading] = useState(false);
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [notesError, setNotesError] = useState("");
@@ -2035,6 +2011,14 @@ ${newsCtx || "-"}
   useEffect(() => {
     if (tab === "ai" && zeroStocks.length === 0 && !zeroLoading) fetchZeroStocks();
   }, [tab]);
+  // 100억 뉴스 탭 진입 시: 이번 주 추천이 없거나 지난 주 것이면 자동 갱신
+  useEffect(() => {
+    if (tab !== "zero") return;
+    const cur = getCurrentWeekKey();
+    if ((!weeklyPick || weeklyPick.weekKey !== cur) && !weeklyPickLoading && getApiKey()) {
+      fetchWeeklyPick(false);
+    }
+  }, [tab]);
   // ===== 목표 달성 전략 (비중조정 + 신규매수) — Claude 호출 =====
   const fetchGoalStrategy = useCallback(async (opts = {}) => {
     setGoalStratLoading(true);
@@ -2450,7 +2434,7 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
     icon: "📝",
     label: "투자노트"
   }];
-  const NOTE_TYPES = ["매매원칙", "관찰", "시나리오", "반성", "목표"];
+  const NOTE_TYPES = ["매매일지", "시나리오", "관심", "기타"];
   // 투자노트 저장
   const saveNote = () => {
     const content = (noteDraft.content || "").trim();
@@ -2461,7 +2445,7 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
     const newNote = {
       id: Date.now(),
       date: new Date().toISOString(),
-      type: noteDraft.type || "매매원칙",
+      type: noteDraft.type || "매매일지",
       ticker: (noteDraft.ticker || "").trim().toUpperCase() || null,
       content: content
     };
@@ -2471,8 +2455,124 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
     setTimeout(() => setNoteSaveStatus(""), 2500);
   };
   const deleteNote = id => {
+    if (!window.confirm("이 노트를 삭제하시겠습니까?")) return;
     setNotesStore(p => ({ ...p, notes: (p.notes || []).filter(n => n.id !== id) }));
+    if (editingNoteId === id) setEditingNoteId(null);
   };
+  // 투자노트 편집
+  const startEditNote = n => {
+    setEditingNoteId(n.id);
+    setEditNoteDraft({
+      type: n.type || "매매일지",
+      ticker: n.ticker || "",
+      content: n.content || ""
+    });
+  };
+  const cancelEditNote = () => {
+    setEditingNoteId(null);
+    setEditNoteDraft({ type: "매매일지", ticker: "", content: "" });
+  };
+  const saveEditNote = () => {
+    const content = (editNoteDraft.content || "").trim();
+    if (!content) return;
+    setNotesStore(p => ({
+      ...p,
+      notes: (p.notes || []).map(n => n.id === editingNoteId ? {
+        ...n,
+        type: editNoteDraft.type || "매매일지",
+        ticker: (editNoteDraft.ticker || "").trim().toUpperCase() || null,
+        content: content,
+        editedAt: new Date().toISOString()
+      } : n)
+    }));
+    setEditingNoteId(null);
+    setEditNoteDraft({ type: "매매일지", ticker: "", content: "" });
+  };
+  // ===== 주간 추천 종목: ISO 주차 키 계산 =====
+  const getCurrentWeekKey = () => {
+    const d = new Date();
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = (t.getUTCDay() + 6) % 7; // 월=0, 일=6
+    t.setUTCDate(t.getUTCDate() - dayNum + 3);
+    const firstThursday = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const week = 1 + Math.round(((t - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+    return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+  };
+  // Claude로 주간 추천 종목 1개 생성 (투자철학 + 보유 종목 연관성 기반)
+  const fetchWeeklyPick = useCallback(async (force = false) => {
+    setWeeklyPickError("");
+    const currentWeek = getCurrentWeekKey();
+    if (!force && weeklyPick && weeklyPick.weekKey === currentWeek) return;
+    if (!getApiKey()) {
+      setWeeklyPickError("AI 분석 탭에서 API 키를 먼저 등록하세요");
+      return;
+    }
+    setWeeklyPickLoading(true);
+    try {
+      const principles = (notesStore.principles || []).map((p, i) => `${i + 1}. ${p.text}`).join("\n") || "(아직 추출된 원칙 없음)";
+      const recentNotes = (notesStore.notes || []).slice(0, 12).map(n => `[${n.type}${n.ticker ? "·" + n.ticker : ""}] ${n.content}`).join("\n") || "(저장된 노트 없음)";
+      const pfTickers = (portfolio || []).map(p => `${p.ticker}(${p.name}, ${p.sector})`).join(", ") || "(보유 종목 없음)";
+      const heldSet = (portfolio || []).map(p => p.ticker).join(",");
+      const data = await callClaude({
+        model: "claude-sonnet-4-5",
+        max_tokens: 1500,
+        system: `당신은 피터 틸 '제로투원' 철학으로 한국인 미국주식 장기투자자에게 주간 신규 종목을 추천하는 전문가입니다.
+사용자의 투자철학·노트와 현재 포트폴리오와 시너지가 있고 성장성이 높은 미국주식 1개를 추천하세요.
+유효한 JSON만 반환 (코드펜스/설명 금지). 스키마:
+{
+  "ticker": "심볼",
+  "name": "회사명",
+  "sector": "섹터(한글)",
+  "marketCap": "대형주|중형주|소형주",
+  "currentPrice": 숫자(USD),
+  "targetPrice": 12개월 목표가 숫자(USD),
+  "upside": "+45.2%",
+  "signal": "강력매수|매수|관찰",
+  "zeroScore": 0~100 정수,
+  "scoreBreakdown": {
+    "monopoly": 0~30,
+    "network": 0~20,
+    "scale": 0~20,
+    "brand": 0~10,
+    "ceo": 0~10,
+    "growth": 0~10
+  },
+  "monopoly": "독점기술|네트워크효과|브랜드독점|규모의경제|비밀",
+  "moat": "이 회사의 핵심 해자 한 문장",
+  "synergy": "보유 종목과의 연관성/시너지 한 문장",
+  "why": "추천 이유 (투자철학과의 연결성 강조, 2-3문장)",
+  "risk": "주요 리스크 한 문장",
+  "verdict": "투자 권고 한 문장"
+}
+규칙:
+- 보유 종목과 중복 금지 (제외 대상: ${heldSet})
+- 보유 섹터/테마와 시너지 있는 종목 우선 (AI 인프라, 핀테크, 우주, 양자컴퓨팅, 로보틱스, 바이오테크 등 보유와 연결되는 영역)
+- 제로투원 zeroScore는 6대 기준 가중점수(독점30+네트워크20+규모20+브랜드10+CEO10+성장성10)의 합계
+- zeroScore 80점 이상만 추천 (못 찾으면 가장 점수 높은 1개)
+- scoreBreakdown 합계는 zeroScore와 일치해야 함`,
+        messages: [{
+          role: "user",
+          content: `[내 투자철학(원칙)]\n${principles}\n\n[최근 투자노트]\n${recentNotes}\n\n[현재 보유 종목]\n${pfTickers}\n\n위 정보를 바탕으로 이번 주(${currentWeek}) 추천 종목 1개를 JSON으로 추천해주세요.`
+        }]
+      });
+      const raw = (data.content || []).map(c => c.text || "").join("").trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(m ? m[0] : cleaned);
+      if (!parsed.ticker) throw new Error("추천 응답 파싱 실패");
+      const pick = {
+        ...parsed,
+        weekKey: currentWeek,
+        generatedAt: new Date().toISOString()
+      };
+      setWeeklyPick(pick);
+      try { localStorage.setItem("weekly_pick_v1", JSON.stringify(pick)); } catch (e) {}
+    } catch (err) {
+      setWeeklyPickError(err.code === "INVALID_KEY" ? "API 키 오류" : err.code === "RATE_LIMIT" ? "호출 한도 초과" : "추천 실패: " + (err.message || ""));
+    } finally {
+      setWeeklyPickLoading(false);
+    }
+  }, [weeklyPick, notesStore, portfolio]);
   // Claude로 노트에서 투자철학(원칙) 추출
   const extractPrinciples = async () => {
     setNotesError("");
@@ -2692,6 +2792,7 @@ JSON 배열만 반환 (마크다운 금지):
     isSearch = false,
     livePrice
   }) => {
+    const [showCriteria, setShowCriteria] = useState(false);
     const mc = moatColor(s.monopoly);
     const sc = scoreColor(s.zeroScore);
     const si = sigStyle(s.signal);
@@ -2763,11 +2864,15 @@ JSON 배열만 반환 (마크다운 금지):
         textAlign: "right"
       }
     }, /*#__PURE__*/React.createElement("div", {
+      onClick: () => setShowCriteria(v => !v),
+      title: "\uD074\uB9AD: \uD3C9\uAC00 \uAE30\uC900 \uBCF4\uAE30",
       style: {
         fontSize: 26,
         fontWeight: 700,
         color: sc,
-        letterSpacing: -1
+        letterSpacing: -1,
+        cursor: "pointer",
+        userSelect: "none"
       }
     }, s.zeroScore, /*#__PURE__*/React.createElement("span", {
       style: {
@@ -2775,7 +2880,9 @@ JSON 배열만 반환 (마크다운 금지):
         color: "#555",
         fontWeight: 400
       }
-    }, "/100")), /*#__PURE__*/React.createElement("div", {
+    }, "/100", /*#__PURE__*/React.createElement("span", {
+      style: { marginLeft: 4, color: sc, fontSize: 11 }
+    }, showCriteria ? "\u25B2" : "\u24D8"))), /*#__PURE__*/React.createElement("div", {
       style: {
         background: si.bg,
         color: si.color,
@@ -2786,7 +2893,66 @@ JSON 배열만 반환 (마크다운 금지):
         marginTop: 4,
         display: "inline-block"
       }
-    }, s.signal))), /*#__PURE__*/React.createElement("div", {
+    }, s.signal))), showCriteria && /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "#0f0f0f",
+        border: `1px solid ${sc}33`,
+        borderRadius: 12,
+        padding: "14px 16px",
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }
+    }, "\uD83C\uDFAF \uC81C\uB85C\uD22C\uC6D0 \uD3C9\uAC00 \uAE30\uC900 (\uD53C\uD130 \uD2F8)"), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 10 }
+    }, "Claude AI\uAC00 \uC544\uB798 6\uAC00\uC9C0 \uAE30\uC900\uC5D0 \uAC00\uC911\uCE58\uB97C \uC801\uC6A9\uD574 \uC885\uD569 \uC810\uC218\uB97C \uC0B0\uCD9C\uD569\uB2C8\uB2E4."), [{
+      name: "\uB3C5\uC810 \uAE30\uC220",
+      w: 30,
+      desc: "\uB300\uC548\uBCF4\uB2E4 10\uBC30 \uC774\uC0C1 \uC6B0\uC6D4\uD55C \uAE30\uC220"
+    }, {
+      name: "\uB124\uD2B8\uC6CC\uD06C \uD6A8\uACFC",
+      w: 20,
+      desc: "\uC0AC\uC6A9\uC790 \uC99D\uAC00 \uC2DC \uAC00\uCE58 \uAE09\uC99D"
+    }, {
+      name: "\uADDC\uBAA8\uC758 \uACBD\uC81C",
+      w: 20,
+      desc: "\uADDC\uBAA8 \uD655\uB300 \uC2DC \uB2E8\uC704\uBE44\uC6A9 \uAC10\uC18C"
+    }, {
+      name: "\uBE0C\uB79C\uB4DC",
+      w: 10,
+      desc: "\uAC15\uB825\uD55C \uBE0C\uB79C\uB4DC \uD504\uB9AC\uBBF8\uC5C4"
+    }, {
+      name: "CEO \uD3C9\uAC00",
+      w: 10,
+      desc: "\uCC3D\uC5C5\uC790/CEO \uBE44\uC804\u00B7\uC2E4\uD589\uB825\u00B7\uC790\uBCF8\uBC30\uBD84"
+    }, {
+      name: "\uBBF8\uB798 \uC131\uC7A5\uC131",
+      w: 10,
+      desc: "\uC7A5\uAE30 \uD604\uAE08\uD750\uB984 \uC7A0\uC7AC\uB825"
+    }].map(c => /*#__PURE__*/React.createElement("div", {
+      key: c.name,
+      style: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid #1f1f1f" }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: "#fff", fontWeight: 600, minWidth: 76 }
+    }, c.name), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: sc, fontWeight: 700, minWidth: 32 }
+    }, c.w + "%"), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: "#777", flex: 1, lineHeight: 1.5 }
+    }, c.desc))), /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 12, padding: "10px 12px", background: "#000", borderRadius: 8, borderLeft: `2px solid ${mc}` }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 10, color: mc, fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }
+    }, "\uD83D\uDCCA " + s.ticker + " \uD3C9\uAC00 \uACB0\uACFC"), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: "#ccc", lineHeight: 1.8 }
+    }, /*#__PURE__*/React.createElement("div", null, "\u2022 \uD575\uC2EC \uD574\uC790: ", /*#__PURE__*/React.createElement("span", {
+      style: { color: mc, fontWeight: 600 }
+    }, s.monopoly)), /*#__PURE__*/React.createElement("div", null, "\u2022 \uC885\uD569 \uC810\uC218: ", /*#__PURE__*/React.createElement("span", {
+      style: { color: sc, fontWeight: 700 }
+    }, s.zeroScore + "/100")), /*#__PURE__*/React.createElement("div", null, "\u2022 \uC2DC\uADF8\uB110: ", /*#__PURE__*/React.createElement("span", {
+      style: { color: si.color, fontWeight: 600 }
+    }, s.signal)), s.upside && /*#__PURE__*/React.createElement("div", null, "\u2022 \uC0C1\uC2B9 \uC5EC\uB825: ", /*#__PURE__*/React.createElement("span", {
+      style: { color: G, fontWeight: 600 }
+    }, "+" + s.upside))))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
         gridTemplateColumns: "1fr 1fr 1fr",
@@ -4999,31 +5165,85 @@ JSON 배열만 반환 (마크다운 금지):
           ? /*#__PURE__*/React.createElement("div", {
               style: { textAlign: "center", padding: "20px 0", color: "#666", fontSize: 12 }
             }, "아직 저장된 노트가 없습니다")
-          : (st.notes || []).slice(0, 50).map((n, i) => /*#__PURE__*/React.createElement("div", {
-              key: n.id,
-              style: { padding: "10px 0", borderBottom: i < Math.min(49, st.notes.length - 1) ? "1px solid #1a1a1a" : "none" }
-            },
-              /*#__PURE__*/React.createElement("div", {
-                style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }
+          : (st.notes || []).slice(0, 50).map((n, i) => {
+              const isEditing = editingNoteId === n.id;
+              if (isEditing) {
+                return /*#__PURE__*/React.createElement("div", {
+                  key: n.id,
+                  style: { padding: "12px 0", borderBottom: i < Math.min(49, st.notes.length - 1) ? "1px solid #1a1a1a" : "none" }
+                },
+                  /*#__PURE__*/React.createElement("div", {
+                    style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }
+                  }, NOTE_TYPES.map(t => /*#__PURE__*/React.createElement("button", {
+                    key: t,
+                    onClick: () => setEditNoteDraft(d => ({ ...d, type: t })),
+                    style: {
+                      background: editNoteDraft.type === t ? G + "22" : "#1a1a1a",
+                      border: editNoteDraft.type === t ? `1px solid ${G}` : "1px solid transparent",
+                      color: editNoteDraft.type === t ? G : "#888",
+                      fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6,
+                      cursor: "pointer", fontFamily: "inherit"
+                    }
+                  }, t))),
+                  /*#__PURE__*/React.createElement("input", {
+                    type: "text",
+                    placeholder: "관련 티커 (선택)",
+                    value: editNoteDraft.ticker,
+                    onChange: e => setEditNoteDraft(d => ({ ...d, ticker: e.target.value })),
+                    style: { width: "100%", boxSizing: "border-box", background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 10px", marginBottom: 8, outline: "none", fontFamily: "inherit" }
+                  }),
+                  /*#__PURE__*/React.createElement("textarea", {
+                    value: editNoteDraft.content,
+                    onChange: e => setEditNoteDraft(d => ({ ...d, content: e.target.value })),
+                    rows: 4,
+                    style: { width: "100%", boxSizing: "border-box", background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, color: "#fff", fontSize: 13, padding: "10px 12px", marginBottom: 8, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, outline: "none" }
+                  }),
+                  /*#__PURE__*/React.createElement("div", {
+                    style: { display: "flex", gap: 8 }
+                  },
+                    /*#__PURE__*/React.createElement("button", {
+                      onClick: saveEditNote,
+                      style: { background: G, color: "#000", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+                    }, "수정 완료"),
+                    /*#__PURE__*/React.createElement("button", {
+                      onClick: cancelEditNote,
+                      style: { background: "#1a1a1a", color: "#888", border: "1px solid #2a2a2a", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }
+                    }, "취소")
+                  )
+                );
+              }
+              return /*#__PURE__*/React.createElement("div", {
+                key: n.id,
+                style: { padding: "10px 0", borderBottom: i < Math.min(49, st.notes.length - 1) ? "1px solid #1a1a1a" : "none" }
               },
-                /*#__PURE__*/React.createElement("span", {
-                  style: { background: "#1a1a1a", color: "#aaa", fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5 }
-                }, n.type),
-                n.ticker && /*#__PURE__*/React.createElement("span", {
-                  style: { background: G + "22", color: G, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5 }
-                }, n.ticker),
-                /*#__PURE__*/React.createElement("span", {
-                  style: { fontSize: 10, color: "#555", marginLeft: "auto" }
-                }, n.date?.slice(0, 10)),
-                /*#__PURE__*/React.createElement("button", {
-                  onClick: () => deleteNote(n.id),
-                  style: { background: "transparent", border: "none", color: "#444", fontSize: 14, cursor: "pointer", padding: 0, marginLeft: 4 }
-                }, "×")
-              ),
-              /*#__PURE__*/React.createElement("div", {
-                style: { fontSize: 13, color: "#ddd", lineHeight: 1.55, whiteSpace: "pre-wrap" }
-              }, n.content)
-            ))
+                /*#__PURE__*/React.createElement("div", {
+                  style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }
+                },
+                  /*#__PURE__*/React.createElement("span", {
+                    style: { background: "#1a1a1a", color: "#aaa", fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5 }
+                  }, n.type),
+                  n.ticker && /*#__PURE__*/React.createElement("span", {
+                    style: { background: G + "22", color: G, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5 }
+                  }, n.ticker),
+                  /*#__PURE__*/React.createElement("span", {
+                    style: { fontSize: 10, color: "#555", marginLeft: "auto" }
+                  }, n.date?.slice(0, 10), n.editedAt && " ✎"),
+                  /*#__PURE__*/React.createElement("button", {
+                    onClick: () => startEditNote(n),
+                    title: "수정",
+                    style: { background: "transparent", border: "none", color: "#666", fontSize: 13, cursor: "pointer", padding: "0 4px", marginLeft: 4 }
+                  }, "✎"),
+                  /*#__PURE__*/React.createElement("button", {
+                    onClick: () => deleteNote(n.id),
+                    title: "삭제",
+                    style: { background: "transparent", border: "none", color: "#444", fontSize: 14, cursor: "pointer", padding: 0, marginLeft: 2 }
+                  }, "×")
+                ),
+                /*#__PURE__*/React.createElement("div", {
+                  style: { fontSize: 13, color: "#ddd", lineHeight: 1.55, whiteSpace: "pre-wrap" }
+                }, n.content)
+              );
+            })
       )
     );
   })()), tab === "zero" && /*#__PURE__*/React.createElement("div", null, (() => {
@@ -5330,7 +5550,186 @@ JSON 배열만 반환 (마크다운 금지):
         padding: "8px 0"
       }
     }, sectorNews.error)));
-  })()))), /*#__PURE__*/React.createElement("style", null, `
+  })()))), tab === "zero" && /*#__PURE__*/React.createElement("div", {
+    style: { padding: "0 14px", marginTop: 18, marginBottom: 24 }
+  }, (() => {
+    const wp = weeklyPick;
+    const wpScoreColor = wp ? (wp.zeroScore >= 90 ? "#00c805" : wp.zeroScore >= 75 ? "#ffd60a" : "#ff9500") : "#888";
+    const moatMap = { "독점기술": "#ff5000", "네트워크효과": "#00c805", "브랜드독점": "#ff9500", "규모의경제": "#00b4d8", "비밀": "#ff5000" };
+    const wpMoatColor = wp ? (moatMap[wp.monopoly] || "#888") : "#888";
+    const sigBg = wp && wp.signal === "강력매수" ? "rgba(0,200,5,0.18)" : wp && wp.signal === "매수" ? "rgba(255,213,10,0.18)" : "rgba(136,136,136,0.18)";
+    const sigFg = wp && wp.signal === "강력매수" ? "#00c805" : wp && wp.signal === "매수" ? "#ffd60a" : "#aaa";
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", {
+        style: { background: "#1a1a1a", borderRadius: 16, overflow: "hidden", border: "1px solid #222" }
+      },
+        /*#__PURE__*/React.createElement("div", {
+          style: { height: 3, background: wp ? `linear-gradient(90deg,${wpMoatColor},${wpScoreColor})` : "#333" }
+        }),
+        /*#__PURE__*/React.createElement("div", {
+          style: { padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }
+        },
+          /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 11, color: "#888", fontWeight: 600, letterSpacing: 0.5, marginBottom: 2 }
+            }, "📅 이번 주 추천 종목"),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 13, color: "#ccc", fontWeight: 700 }
+            }, "투자철학 · 보유 종목 연관성 기반")
+          ),
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => fetchWeeklyPick(true),
+            disabled: weeklyPickLoading,
+            style: { background: weeklyPickLoading ? "#1a1a1a" : "rgba(0,200,5,0.14)", border: `1px solid ${weeklyPickLoading ? "#333" : "#00c80555"}`, color: weeklyPickLoading ? "#555" : "#00c805", fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, cursor: weeklyPickLoading ? "default" : "pointer", fontFamily: "inherit" }
+          }, weeklyPickLoading ? "분석중..." : "↻ 새 추천")
+        ),
+        weeklyPickError && /*#__PURE__*/React.createElement("div", {
+          style: { padding: "0 16px 12px", color: R, fontSize: 12 }
+        }, "⚠️ ", weeklyPickError),
+        !wp && !weeklyPickLoading && !weeklyPickError && /*#__PURE__*/React.createElement("div", {
+          style: { padding: "20px 16px 24px", color: "#666", fontSize: 12, textAlign: "center" }
+        }, "AI 분석 탭에서 API 키를 등록하고 '↻ 새 추천'을 눌려주세요"),
+        weeklyPickLoading && !wp && /*#__PURE__*/React.createElement("div", {
+          style: { padding: "20px 16px 24px", color: "#888", fontSize: 12, textAlign: "center" }
+        }, "투자철학과 보유 종목을 분석 중입니다..."),
+        wp && /*#__PURE__*/React.createElement("div", {
+          style: { padding: "0 16px 16px" }
+        },
+          /*#__PURE__*/React.createElement("div", {
+            style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }
+          },
+            /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("div", {
+                style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }
+              },
+                /*#__PURE__*/React.createElement("span", {
+                  style: { fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: -0.5 }
+                }, wp.ticker),
+                /*#__PURE__*/React.createElement("span", {
+                  style: { fontSize: 12, background: wpMoatColor + "22", color: wpMoatColor, borderRadius: 20, padding: "2px 10px", fontWeight: 600, border: `1px solid ${wpMoatColor}44` }
+                }, wp.monopoly || "—")
+              ),
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 12, color: "#888" }
+              }, wp.name, " · ", wp.sector, " · ", wp.marketCap)
+            ),
+            /*#__PURE__*/React.createElement("div", {
+              style: { textAlign: "right" }
+            },
+              /*#__PURE__*/React.createElement("div", {
+                onClick: () => setWeeklyPickShowCriteria(v => !v),
+                title: "클릭: 점수 상세 보기",
+                style: { fontSize: 26, fontWeight: 700, color: wpScoreColor, letterSpacing: -1, cursor: "pointer", userSelect: "none" }
+              },
+                wp.zeroScore,
+                /*#__PURE__*/React.createElement("span", {
+                  style: { fontSize: 12, color: "#555", fontWeight: 400 }
+                },
+                  "/100",
+                  /*#__PURE__*/React.createElement("span", {
+                    style: { marginLeft: 4, color: wpScoreColor, fontSize: 11 }
+                  }, weeklyPickShowCriteria ? "▲" : "ⓘ")
+                )
+              ),
+              /*#__PURE__*/React.createElement("div", {
+                style: { background: sigBg, color: sigFg, borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 700, marginTop: 4, display: "inline-block" }
+              }, wp.signal || "—")
+            )
+          ),
+          weeklyPickShowCriteria && wp.scoreBreakdown && /*#__PURE__*/React.createElement("div", {
+            style: { background: "#0f0f0f", border: `1px solid ${wpScoreColor}33`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }
+          },
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 11, color: wpScoreColor, fontWeight: 700, marginBottom: 8 }
+            }, "🎯 제로투원 6대 기준 점수"),
+            [
+              { name: "독점 기술", w: 30, val: wp.scoreBreakdown.monopoly },
+              { name: "네트워크 효과", w: 20, val: wp.scoreBreakdown.network },
+              { name: "규모의 경제", w: 20, val: wp.scoreBreakdown.scale },
+              { name: "브랜드", w: 10, val: wp.scoreBreakdown.brand },
+              { name: "CEO 평가", w: 10, val: wp.scoreBreakdown.ceo },
+              { name: "미래 성장성", w: 10, val: wp.scoreBreakdown.growth }
+            ].map(c => /*#__PURE__*/React.createElement("div", {
+              key: c.name,
+              style: { display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid #1f1f1f" }
+            },
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 11, color: "#fff", fontWeight: 600, minWidth: 76 }
+              }, c.name),
+              /*#__PURE__*/React.createElement("div", {
+                style: { flex: 1, height: 6, background: "#222", borderRadius: 3, overflow: "hidden" }
+              },
+                /*#__PURE__*/React.createElement("div", {
+                  style: { width: `${Math.max(0, Math.min(100, ((c.val || 0) / c.w) * 100))}%`, height: "100%", background: wpScoreColor, borderRadius: 3 }
+                })
+              ),
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 10, color: wpScoreColor, fontWeight: 700, minWidth: 40, textAlign: "right" }
+              }, (c.val != null ? c.val : "?") + "/" + c.w)
+            ))
+          ),
+          /*#__PURE__*/React.createElement("div", {
+            style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }
+          },
+            [
+              { label: "현재가", val: wp.currentPrice ? `$${Number(wp.currentPrice).toFixed(2)}` : "—", color: "#fff" },
+              { label: "목표가", val: wp.targetPrice ? `$${Number(wp.targetPrice).toLocaleString()}` : "—", color: G },
+              { label: "상승여력", val: wp.upside || "—", color: G }
+            ].map(m => /*#__PURE__*/React.createElement("div", {
+              key: m.label,
+              style: { background: "#0a0a0a", borderRadius: 10, padding: "9px 8px", textAlign: "center" }
+            },
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 10, color: "#555", marginBottom: 3, letterSpacing: 0.5 }
+              }, m.label),
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 14, fontWeight: 700, color: m.color }
+              }, m.val)
+            ))
+          ),
+          wp.synergy && /*#__PURE__*/React.createElement("div", {
+            style: { background: "#0a0a0a", borderRadius: 10, padding: "10px 12px", marginBottom: 8, borderLeft: `2px solid ${G}` }
+          },
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 10, color: G, fontWeight: 700, marginBottom: 4, letterSpacing: 1 }
+            }, "🔗 보유 종목 연관성"),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 12, color: "#ccc", lineHeight: 1.6 }
+            }, wp.synergy)
+          ),
+          wp.moat && /*#__PURE__*/React.createElement("div", {
+            style: { background: "#0a0a0a", borderRadius: 10, padding: "10px 12px", marginBottom: 8, borderLeft: `2px solid ${wpMoatColor}` }
+          },
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 10, color: wpMoatColor, fontWeight: 700, marginBottom: 4, letterSpacing: 1 }
+            }, "제로투원 해자"),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 12, color: "#ccc", lineHeight: 1.6 }
+            }, wp.moat)
+          ),
+          wp.why && /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 12, color: "#999", lineHeight: 1.65, marginBottom: 8 }
+          }, wp.why),
+          wp.verdict && /*#__PURE__*/React.createElement("div", {
+            style: { background: "rgba(0,200,5,0.06)", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: G, fontWeight: 600 }
+          }, "💡 ", wp.verdict),
+          wp.risk && /*#__PURE__*/React.createElement("div", {
+            style: { display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 8 }
+          },
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 9, background: "rgba(255,80,0,0.15)", color: R, borderRadius: 5, padding: "2px 7px", fontWeight: 700, marginTop: 2, whiteSpace: "nowrap" }
+            }, "리스크"),
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 11, color: "#666", lineHeight: 1.55 }
+            }, wp.risk)
+          ),
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 10, color: "#444", marginTop: 6, textAlign: "right" }
+          }, wp.weekKey || "—", " · ", wp.generatedAt ? new Date(wp.generatedAt).toLocaleDateString("ko-KR") : "—")
+        )
+      )
+    );
+  })()), /*#__PURE__*/React.createElement("style", null, `
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
         @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
         @keyframes spin{to{transform:rotate(360deg)}}
