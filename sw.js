@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v29.2026-05-02-ticker-match";
+const CACHE_VERSION = "v30.2026-05-02-score-breakdown";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 

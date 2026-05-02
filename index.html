@@ -1466,6 +1466,8 @@ function App() {
     };
   }, []);
   const [zeroStocks, setZeroStocks] = useState([]);
+  // 종목별 세부 점수 fetch 상태: ticker → "loading" | "ok" | "error" | undefined
+  const [breakdownLoading, setBreakdownLoading] = useState({});
   const [zeroLoading, setZeroLoading] = useState(false);
   const [zeroLastFetch, setZeroLastFetch] = useState(null);
   const [zeroError, setZeroError] = useState("");
@@ -2069,6 +2071,76 @@ ${newsCtx || "-"}
       setAiLoading(false);
     }
   }, [portfolio, totalValue, totalPnLPct, livePrices, goal, deadline, activeInvestor]);
+  // Claude로 단일 종목의 6대 항목별 점수 즉시 산출 (resolveTickerProfile로 검증된 ticker만 사용)
+  const fetchZeroBreakdown = useCallback(async (stock) => {
+    if (!stock || !stock.ticker) return;
+    const tk = stock.ticker;
+    if (!getApiKey()) {
+      setZeroError("API 키를 먼저 등록하세요");
+      return;
+    }
+    setBreakdownLoading(p => ({ ...p, [tk]: "loading" }));
+    try {
+      // 1) 티커 검증 (오매칭 방지)
+      const resolved = await resolveTickerProfile(tk);
+      const verifiedName = resolved?.name || stock.name || tk;
+      const verifiedIndustry = resolved?.industry || stock.sector || "";
+      // 2) Claude에 검증된 정보 + 기존 zeroScore 앵커로 6대 항목별 점수 요청
+      const data = await callClaude({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
+        system: `당신은 피터 틸 '제로투원' 6대 기준으로 미국주식을 채점하는 전문 애널리스트입니다.
+
+⚠️ 절대 규칙: 다음 회사만 분석. ticker는 절대 다른 것으로 바꾸지 마세요.
+[확정된 분석 대상]
+- ticker: ${tk}
+- 회사명: ${verifiedName}
+- 산업: ${verifiedIndustry}
+- 기존 종합점수(앵커): ${stock.zeroScore || "?"} / 100
+
+반드시 유효한 JSON만 반환 (코드펜스/설명 금지). 스키마:
+{
+  "scoreBreakdown": {
+    "monopoly": {"score": 0~30, "comment": "독점기술 한 줄 평"},
+    "network": {"score": 0~20, "comment": "네트워크 효과 한 줄 평"},
+    "scale": {"score": 0~20, "comment": "규모경제 한 줄 평"},
+    "brand": {"score": 0~10, "comment": "브랜드 한 줄 평"},
+    "ceo": {"score": 0~10, "comment": "CEO 평가 한 줄 평"},
+    "growth": {"score": 0~10, "comment": "미래 성장성 한 줄 평"}
+  }
+}
+
+규칙:
+- 모든 score는 정수
+- 6개 합계가 기존 종합점수(${stock.zeroScore || "?"})와 ±5점 이내가 되도록 조정
+- 채점 기준: 독점30(10배 우월), 네트워크20(비선형 가치 증가), 규모20(단위비용 감소), 브랜드10(프리미엄), CEO10(창업자/비전), 성장10(TAM/장기CF)`,
+        messages: [{
+          role: "user",
+          content: `${tk}(${verifiedName})의 6대 항목별 점수와 한 줄 평을 산출해주세요.`
+        }]
+      });
+      const raw = (data.content || []).map(c => c.text || "").join("").trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(m ? m[0] : cleaned);
+      if (!parsed.scoreBreakdown) throw new Error("응답에 scoreBreakdown 없음");
+      // 3) zeroStocks 업데이트 + __NEWS_DATA 캐시
+      setZeroStocks(prev => prev.map(s =>
+        s.ticker === tk ? { ...s, scoreBreakdown: parsed.scoreBreakdown } : s
+      ));
+      const ND = (window.__NEWS_DATA = window.__NEWS_DATA || {});
+      if (Array.isArray(ND.zeroStocks)) {
+        ND.zeroStocks = ND.zeroStocks.map(s =>
+          s.ticker === tk ? { ...s, scoreBreakdown: parsed.scoreBreakdown } : s
+        );
+      }
+      setBreakdownLoading(p => ({ ...p, [tk]: "ok" }));
+    } catch (err) {
+      console.error("fetchZeroBreakdown failed:", err);
+      setBreakdownLoading(p => ({ ...p, [tk]: "error" }));
+      setZeroError("세부 점수 산출 실패: " + (err.message || ""));
+    }
+  }, []);
   const fetchZeroStocks = useCallback(async () => {
     setZeroLoading(true);
     setZeroError("");
@@ -3170,44 +3242,108 @@ JSON 배열만 반환 (마크다운 금지):
         padding: "14px 16px",
         marginBottom: 14
       }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }
-    }, "\uD83C\uDFAF \uC81C\uB85C\uD22C\uC6D0 \uD3C9\uAC00 \uAE30\uC900 (\uD53C\uD130 \uD2F8)"), /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 10 }
-    }, "Claude AI\uAC00 \uC544\uB798 6\uAC00\uC9C0 \uAE30\uC900\uC5D0 \uAC00\uC911\uCE58\uB97C \uC801\uC6A9\uD574 \uC885\uD569 \uC810\uC218\uB97C \uC0B0\uCD9C\uD569\uB2C8\uB2E4."), [{
-      name: "\uB3C5\uC810 \uAE30\uC220",
-      w: 30,
-      desc: "\uB300\uC548\uBCF4\uB2E4 10\uBC30 \uC774\uC0C1 \uC6B0\uC6D4\uD55C \uAE30\uC220"
-    }, {
-      name: "\uB124\uD2B8\uC6CC\uD06C \uD6A8\uACFC",
-      w: 20,
-      desc: "\uC0AC\uC6A9\uC790 \uC99D\uAC00 \uC2DC \uAC00\uCE58 \uAE09\uC99D"
-    }, {
-      name: "\uADDC\uBAA8\uC758 \uACBD\uC81C",
-      w: 20,
-      desc: "\uADDC\uBAA8 \uD655\uB300 \uC2DC \uB2E8\uC704\uBE44\uC6A9 \uAC10\uC18C"
-    }, {
-      name: "\uBE0C\uB79C\uB4DC",
-      w: 10,
-      desc: "\uAC15\uB825\uD55C \uBE0C\uB79C\uB4DC \uD504\uB9AC\uBBF8\uC5C4"
-    }, {
-      name: "CEO \uD3C9\uAC00",
-      w: 10,
-      desc: "\uCC3D\uC5C5\uC790/CEO \uBE44\uC804\u00B7\uC2E4\uD589\uB825\u00B7\uC790\uBCF8\uBC30\uBD84"
-    }, {
-      name: "\uBBF8\uB798 \uC131\uC7A5\uC131",
-      w: 10,
-      desc: "\uC7A5\uAE30 \uD604\uAE08\uD750\uB984 \uC7A0\uC7AC\uB825"
-    }].map(c => /*#__PURE__*/React.createElement("div", {
-      key: c.name,
-      style: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid #1f1f1f" }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 12, color: "#fff", fontWeight: 600, minWidth: 76 }
-    }, c.name), /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 11, color: sc, fontWeight: 700, minWidth: 32 }
-    }, c.w + "%"), /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 11, color: "#777", flex: 1, lineHeight: 1.5 }
-    }, c.desc))), /*#__PURE__*/React.createElement("div", {
+    }, (() => {
+      const CRITERIA = [
+        { key: "monopoly", name: "독점 기술", w: 30, desc: "대안보다 10배 이상 우월한 기술" },
+        { key: "network", name: "네트워크 효과", w: 20, desc: "사용자 증가 시 가치 급증" },
+        { key: "scale", name: "규모의 경제", w: 20, desc: "규모 확대 시 단위비용 감소" },
+        { key: "brand", name: "브랜드", w: 10, desc: "강력한 브랜드 프리미엄" },
+        { key: "ceo", name: "CEO 평가", w: 10, desc: "창업자/CEO 비전·실행력·자본배분" },
+        { key: "growth", name: "미래 성장성", w: 10, desc: "장기 현금흐름 잠재력" }
+      ];
+      const bd = s.scoreBreakdown;
+      const isLoading = breakdownLoading[s.ticker] === "loading";
+      const hasBreakdown = bd && typeof bd === "object";
+      // 이미 점수가 있으면 → 항목별 막대 + 점수 + 코멘트
+      if (hasBreakdown) {
+        return [
+          /*#__PURE__*/React.createElement("div", {
+            key: "h",
+            style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }
+          }, "📊 " + s.ticker + " 항목별 득점 (피터 틸 6대 기준)"),
+          /*#__PURE__*/React.createElement("div", {
+            key: "sub",
+            style: { fontSize: 11, color: "#888", marginBottom: 10 }
+          }, "종합 ", /*#__PURE__*/React.createElement("span", { style: { color: sc, fontWeight: 700 } }, s.zeroScore + "/100")),
+          /*#__PURE__*/React.createElement("div", {
+            key: "list",
+            style: { display: "grid", gap: 8 }
+          }, CRITERIA.map(c => {
+            const item = bd[c.key] || {};
+            const score = typeof item === "number" ? item : (item.score ?? 0);
+            const comment = typeof item === "object" ? (item.comment || "") : "";
+            const ratio = c.w > 0 ? Math.max(0, Math.min(1, score / c.w)) : 0;
+            const barColor = ratio >= 0.85 ? "#00c805" : ratio >= 0.6 ? "#ffd60a" : "#ff7a3c";
+            return /*#__PURE__*/React.createElement("div", {
+              key: c.key,
+              style: { background: "#000", borderRadius: 8, padding: "8px 10px" }
+            },
+              /*#__PURE__*/React.createElement("div", {
+                style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }
+              },
+                /*#__PURE__*/React.createElement("span", {
+                  style: { fontSize: 12, fontWeight: 700, color: "#fff" }
+                }, c.name, /*#__PURE__*/React.createElement("span", { style: { color: "#555", fontWeight: 500, marginLeft: 5, fontSize: 10 } }, "(" + c.w + ")")),
+                /*#__PURE__*/React.createElement("span", {
+                  style: { fontSize: 13, fontWeight: 800, color: barColor, fontVariantNumeric: "tabular-nums" }
+                }, score, /*#__PURE__*/React.createElement("span", { style: { color: "#555", fontWeight: 500, fontSize: 10 } }, " / " + c.w))
+              ),
+              /*#__PURE__*/React.createElement("div", {
+                style: { height: 4, background: "#1a1a1a", borderRadius: 2, overflow: "hidden", marginBottom: comment ? 5 : 0 }
+              },
+                /*#__PURE__*/React.createElement("div", {
+                  style: { width: (ratio * 100) + "%", height: "100%", background: barColor, transition: "width 0.4s ease" }
+                })
+              ),
+              comment && /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 10, color: "#888", lineHeight: 1.45 }
+              }, comment)
+            );
+          }))
+        ];
+      }
+      // 점수 없음 → 평가 기준 + AI 분석 버튼
+      return [
+        /*#__PURE__*/React.createElement("div", {
+          key: "h",
+          style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }
+        }, "🎯 제로투원 평가 기준 (피터 틸)"),
+        /*#__PURE__*/React.createElement("div", {
+          key: "sub",
+          style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 10 }
+        }, "Claude AI가 아래 6가지 기준에 가중치를 적용해 종합 점수를 산출합니다."),
+        /*#__PURE__*/React.createElement("div", {
+          key: "list",
+          style: { marginBottom: 12 }
+        }, CRITERIA.map(c => /*#__PURE__*/React.createElement("div", {
+          key: c.key,
+          style: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "1px solid #1f1f1f" }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: { fontSize: 12, color: "#fff", fontWeight: 600, minWidth: 90 }
+        }, c.name), /*#__PURE__*/React.createElement("div", {
+          style: { fontSize: 11, color: sc, fontWeight: 700, minWidth: 32 }
+        }, c.w + "%"), /*#__PURE__*/React.createElement("div", {
+          style: { fontSize: 11, color: "#777", flex: 1, lineHeight: 1.5 }
+        }, c.desc)))),
+        /*#__PURE__*/React.createElement("button", {
+          key: "btn",
+          onClick: () => fetchZeroBreakdown(s),
+          disabled: isLoading,
+          style: {
+            width: "100%",
+            background: isLoading ? "#1a1a1a" : "rgba(0,200,5,0.12)",
+            border: "1px solid " + (isLoading ? "#333" : "rgba(0,200,5,0.4)"),
+            borderRadius: 8,
+            color: isLoading ? "#666" : "#00c805",
+            fontSize: 12,
+            fontWeight: 700,
+            padding: "10px",
+            cursor: isLoading ? "wait" : "pointer",
+            fontFamily: "inherit"
+          }
+        }, isLoading ? "분석 중..." : "🔬 AI로 항목별 득점 분석 (Haiku, ~1초)")
+      ];
+    })(), /*#__PURE__*/React.createElement("div", {
       style: { marginTop: 12, padding: "10px 12px", background: "#000", borderRadius: 8, borderLeft: `2px solid ${mc}` }
     }, /*#__PURE__*/React.createElement("div", {
       style: { fontSize: 10, color: mc, fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }
@@ -6179,7 +6315,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 ticker-match-v1 */
+/* build:2026-05-02 score-breakdown-v1 */
 </script>
 </body>
 </html>
