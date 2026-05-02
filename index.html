@@ -2101,19 +2101,25 @@ ${newsCtx || "-"}
 반드시 유효한 JSON만 반환 (코드펜스/설명 금지). 스키마:
 {
   "scoreBreakdown": {
-    "monopoly": {"score": 0~30, "comment": "독점기술 한 줄 평"},
-    "network": {"score": 0~20, "comment": "네트워크 효과 한 줄 평"},
-    "scale": {"score": 0~20, "comment": "규모경제 한 줄 평"},
-    "brand": {"score": 0~10, "comment": "브랜드 한 줄 평"},
-    "ceo": {"score": 0~10, "comment": "CEO 평가 한 줄 평"},
-    "growth": {"score": 0~10, "comment": "미래 성장성 한 줄 평"}
+    "tam":       {"score": 0~25, "comment": "시장 규모/침투율 한 줄 평"},
+    "monopoly":  {"score": 0~20, "comment": "독점 기술/IP 해자 한 줄 평"},
+    "growth":    {"score": 0~15, "comment": "최근 3년 매출 성장률 한 줄 평"},
+    "ceo":       {"score": 0~15, "comment": "창업자-CEO + 인사이더 지분 한 줄 평"},
+    "network":   {"score": 0~15, "comment": "네트워크 효과/스위칭 비용 한 줄 평"},
+    "valuation": {"score": 0~10, "comment": "진입 밸류에이션 한 줄 평"}
   }
 }
 
 규칙:
 - 모든 score는 정수
 - 6개 합계가 기존 종합점수(${stock.zeroScore || "?"})와 ±5점 이내가 되도록 조정
-- 채점 기준: 독점30(10배 우월), 네트워크20(비선형 가치 증가), 규모20(단위비용 감소), 브랜드10(프리미엄), CEO10(창업자/비전), 성장10(TAM/장기CF)`,
+- 채점 기준 (텐배거 발굴 최적화):
+  · TAM 25: 시장 규모 충분히 크고 침투율 <10%면 22~25, 작거나 포화면 5~10
+  · 독점 20: 10배 우월 기술/IP/데이터 보유 시 17~20, 평범하면 5~10
+  · 매출성장 15: 3년 CAGR 30%+ 시 13~15, 둔화 시 3~7
+  · CEO 15: 창업자 + 의미있는 인사이더 지분(>5%) + 자본배분 우수 시 13~15
+  · 네트워크/스위칭 15: 비선형 가치 증가 또는 높은 전환비용 시 12~15
+  · 밸류에이션 10: PSR/성장 비율 양호(PEG-스타일) 8~10, 거품 시 1~3`,
         messages: [{
           role: "user",
           content: `${tk}(${verifiedName})의 6대 항목별 점수와 한 줄 평을 산출해주세요.`
@@ -2757,12 +2763,12 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
   "signal": "강력매수|매수|관찰",
   "zeroScore": 0~100 정수,
   "scoreBreakdown": {
-    "monopoly": 0~30,
-    "network": 0~20,
-    "scale": 0~20,
-    "brand": 0~10,
-    "ceo": 0~10,
-    "growth": 0~10
+    "tam": 0~25,
+    "monopoly": 0~20,
+    "growth": 0~15,
+    "ceo": 0~15,
+    "network": 0~15,
+    "valuation": 0~10
   },
   "monopoly": "독점기술|네트워크효과|브랜드독점|규모의경제|비밀",
   "moat": "이 회사의 핵심 해자 한 문장",
@@ -2774,7 +2780,7 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
 규칙:
 - 보유 종목과 중복 금지 (제외 대상: ${heldSet})
 - 보유 섹터/테마와 시너지 있는 종목 우선 (AI 인프라, 핀테크, 우주, 양자컴퓨팅, 로보틱스, 바이오테크 등 보유와 연결되는 영역)
-- 제로투원 zeroScore는 6대 기준 가중점수(독점30+네트워크20+규모20+브랜드10+CEO10+성장성10)의 합계
+- 제로투원 zeroScore는 텐배거 6대 기준 가중점수(TAM25+독점20+매출성장15+CEO15+네트워크/스위칭15+밸류에이션10)의 합계
 - zeroScore 80점 이상만 추천 (못 찾으면 가장 점수 높은 1개)
 - scoreBreakdown 합계는 zeroScore와 일치해야 함`,
         messages: [{
@@ -2802,7 +2808,7 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
   }, [weeklyPick, notesStore, portfolio]);
   // ============================================================
   // 회사 평가 (제로투원 6대 기준 채점)
-  //   독점기술 30 + 네트워크효과 20 + 규모경제 20 + 브랜드 10 + CEO 10 + 성장성 10 = 100
+  //   TAM 25 + 독점 20 + 매출성장 15 + CEO 15 + 네트워크/스위칭 15 + 밸류에이션 10 = 100 (텐배거 최적화)
   // ============================================================
   const analyzeCompany = useCallback(async (queryRaw) => {
     const query = (queryRaw || "").trim();
@@ -2853,12 +2859,12 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
   "marketCap": "대형주|중형주|소형주",
   "currentPrice": 숫자(USD, 모르면 null),
   "scores": {
-    "monopoly": {"score": 0~30, "comment": "독점 기술 평가 한 문장"},
-    "network": {"score": 0~20, "comment": "네트워크 효과 평가 한 문장"},
-    "scale": {"score": 0~20, "comment": "규모의 경제 평가 한 문장"},
-    "brand": {"score": 0~10, "comment": "브랜드 파워 평가 한 문장"},
-    "ceo": {"score": 0~10, "comment": "CEO 비전·실행력·자본배분 평가 한 문장"},
-    "growth": {"score": 0~10, "comment": "장기 현금흐름 잠재력 평가 한 문장"}
+    "tam":       {"score": 0~25, "comment": "TAM 크기 + 침투율 평가 한 문장"},
+    "monopoly":  {"score": 0~20, "comment": "독점 기술/IP 해자 평가 한 문장"},
+    "growth":    {"score": 0~15, "comment": "최근 3년 매출 성장률 평가 한 문장"},
+    "ceo":       {"score": 0~15, "comment": "창업자-CEO + 인사이더 지분/자본배분 평가 한 문장"},
+    "network":   {"score": 0~15, "comment": "네트워크 효과 + 스위칭 비용 평가 한 문장"},
+    "valuation": {"score": 0~10, "comment": "진입 밸류에이션(PSR vs 성장률) 평가 한 문장"}
   },
   "totalScore": 합계(scores 6개의 score 합),
   "grade": "S(95+)|A(85~94)|B(70~84)|C(50~69)|D(<50)",
@@ -2869,13 +2875,13 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
   "summary": "종합 평가 2~3문장"
 }
 
-채점 기준:
-- 독점 기술 (30점): 대안 대비 10배 이상 우월한 핵심 기술/특허/데이터 보유 시 25~30점, 평범하면 10~15점
-- 네트워크 효과 (20점): 사용자/데이터 증가 시 가치가 비선형적으로 증가하면 18~20점
-- 규모의 경제 (20점): 매출 증가 시 단위비용이 급격히 감소하면 18~20점
-- 브랜드 (10점): 가격 프리미엄을 받을 수 있는 강력한 브랜드면 8~10점
-- CEO (10점): 창업자 CEO + 명확한 비전 + 자본배분 우수 시 9~10점
-- 미래 성장성 (10점): TAM 거대 + 진입 초기 + 장기 캐시플로우 강하면 9~10점
+채점 기준 (텐배거 발굴 최적화):
+- 시장 규모 TAM (25점): TAM 충분히 크고 회사 침투율 <10%면 22~25, 시장 작거나 포화 시 5~10
+- 독점 기술/IP 해자 (20점): 대안 대비 10배 이상 우월한 기술·특허·데이터 보유 시 17~20, 평범하면 5~10
+- 매출 성장률 3년 (15점): 3년 CAGR 30%+ 연속 시 13~15, 30% 미만 둔화 시 3~7
+- 창업자-CEO + 인사이더 지분 (15점): 창업자 CEO + 인사이더 지분 5%+ + 자본배분 우수 시 13~15, 전문경영인이면 5~8
+- 네트워크 효과/스위칭 비용 (15점): 사용자 증가 시 비선형 가치 또는 높은 전환비용 시 12~15
+- 진입 밸류에이션 (10점): PSR/성장률 비율 양호(PEG-스타일) 8~10, PSR 50x+ 거품 시 1~3
 
 규칙:
 - 모든 score는 정수
@@ -3244,12 +3250,12 @@ JSON 배열만 반환 (마크다운 금지):
       }
     }, (() => {
       const CRITERIA = [
-        { key: "monopoly", name: "독점 기술", w: 30, desc: "대안보다 10배 이상 우월한 기술" },
-        { key: "network", name: "네트워크 효과", w: 20, desc: "사용자 증가 시 가치 급증" },
-        { key: "scale", name: "규모의 경제", w: 20, desc: "규모 확대 시 단위비용 감소" },
-        { key: "brand", name: "브랜드", w: 10, desc: "강력한 브랜드 프리미엄" },
-        { key: "ceo", name: "CEO 평가", w: 10, desc: "창업자/CEO 비전·실행력·자본배분" },
-        { key: "growth", name: "미래 성장성", w: 10, desc: "장기 현금흐름 잠재력" }
+        { key: "tam",       name: "시장 규모(TAM)",      w: 25, desc: "TAM 크기 + 침투율 (텐배거 1위 예측변수)" },
+        { key: "monopoly",  name: "독점 기술/해자",       w: 20, desc: "대안 대비 10배 이상 우월한 기술/IP" },
+        { key: "growth",    name: "매출 성장률(3년)",     w: 15, desc: "3년 CAGR 30%+ 연속 여부" },
+        { key: "ceo",       name: "창업자-CEO + 지분",    w: 15, desc: "창업자 CEO + 인사이더 지분 5%+ + 자본배분" },
+        { key: "network",   name: "네트워크/스위칭비용",  w: 15, desc: "사용자 증가 시 가치 급증 또는 전환비용 高" },
+        { key: "valuation", name: "진입 밸류에이션",      w: 10, desc: "PSR/성장률 비율 (PEG-스타일)" }
       ];
       const bd = s.scoreBreakdown;
       const isLoading = breakdownLoading[s.ticker] === "loading";
@@ -3260,7 +3266,7 @@ JSON 배열만 반환 (마크다운 금지):
           /*#__PURE__*/React.createElement("div", {
             key: "h",
             style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }
-          }, "📊 " + s.ticker + " 항목별 득점 (피터 틸 6대 기준)"),
+          }, "📊 " + s.ticker + " 항목별 득점 (텐배거 6대 기준)"),
           /*#__PURE__*/React.createElement("div", {
             key: "sub",
             style: { fontSize: 11, color: "#888", marginBottom: 10 }
@@ -3307,7 +3313,7 @@ JSON 배열만 반환 (마크다운 금지):
         /*#__PURE__*/React.createElement("div", {
           key: "h",
           style: { fontSize: 12, color: sc, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }
-        }, "🎯 제로투원 평가 기준 (피터 틸)"),
+        }, "🎯 텐배거 평가 기준 (10x 발굴 최적화)"),
         /*#__PURE__*/React.createElement("div", {
           key: "sub",
           style: { fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 10 }
@@ -5151,12 +5157,12 @@ JSON 배열만 반환 (마크다운 금지):
       },
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 16 } }, "\uD83D\uDD2C"),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#fff" } },
-          "제로투원 6대 기준 회사 평가"
+          "텐배거 6대 기준 회사 평가"
         )
       ),
       /*#__PURE__*/React.createElement("div", {
         style: { fontSize: 11, color: "#888", lineHeight: 1.5, marginBottom: 10 }
-      }, "회사명 또는 티커를 입력하면 피터 틸 6대 기준으로 채점합니다 (독점 30 / 네트워크 20 / 규모 20 / 브랜드 10 / CEO 10 / 성장 10)"),
+      }, "회사명 또는 티커를 입력하면 10x 발굴 최적화 기준으로 채점합니다 (TAM 25 / 독점 20 / 매출성장 15 / CEO 15 / 네트워크·스위칭 15 / 밸류에이션 10)"),
       /*#__PURE__*/React.createElement("form", {
         onSubmit: (e) => { e.preventDefault(); analyzeCompany(companyQuery); },
         style: { display: "flex", gap: 6, marginBottom: 10 }
@@ -5238,12 +5244,12 @@ JSON 배열만 반환 (마크다운 금지):
           style: { display: "grid", gap: 8, marginBottom: 12 }
         },
           [
-            { key: "monopoly", label: "독점 기술", max: 30 },
-            { key: "network", label: "네트워크 효과", max: 20 },
-            { key: "scale", label: "규모의 경제", max: 20 },
-            { key: "brand", label: "브랜드", max: 10 },
-            { key: "ceo", label: "CEO 평가", max: 10 },
-            { key: "growth", label: "미래 성장성", max: 10 }
+            { key: "tam",       label: "시장 규모(TAM)",     max: 25 },
+            { key: "monopoly",  label: "독점 기술/해자",      max: 20 },
+            { key: "growth",    label: "매출 성장률(3년)",    max: 15 },
+            { key: "ceo",       label: "창업자-CEO + 지분",   max: 15 },
+            { key: "network",   label: "네트워크/스위칭",     max: 15 },
+            { key: "valuation", label: "진입 밸류에이션",     max: 10 }
           ].map(({ key, label, max }) => {
             const item = companyAnalysis.scores[key] || {};
             const score = item.score ?? 0;
@@ -6215,14 +6221,14 @@ JSON 배열만 반환 (마크다운 금지):
           },
             /*#__PURE__*/React.createElement("div", {
               style: { fontSize: 11, color: wpScoreColor, fontWeight: 700, marginBottom: 8 }
-            }, "🎯 제로투원 6대 기준 점수"),
+            }, "🎯 텐배거 6대 기준 점수"),
             [
-              { name: "독점 기술", w: 30, val: wp.scoreBreakdown.monopoly },
-              { name: "네트워크 효과", w: 20, val: wp.scoreBreakdown.network },
-              { name: "규모의 경제", w: 20, val: wp.scoreBreakdown.scale },
-              { name: "브랜드", w: 10, val: wp.scoreBreakdown.brand },
-              { name: "CEO 평가", w: 10, val: wp.scoreBreakdown.ceo },
-              { name: "미래 성장성", w: 10, val: wp.scoreBreakdown.growth }
+              { name: "시장 규모(TAM)",      w: 25, val: wp.scoreBreakdown.tam },
+              { name: "독점 기술/해자",       w: 20, val: wp.scoreBreakdown.monopoly },
+              { name: "매출 성장률(3년)",     w: 15, val: wp.scoreBreakdown.growth },
+              { name: "창업자-CEO + 지분",    w: 15, val: wp.scoreBreakdown.ceo },
+              { name: "네트워크/스위칭",      w: 15, val: wp.scoreBreakdown.network },
+              { name: "진입 밸류에이션",      w: 10, val: wp.scoreBreakdown.valuation }
             ].map(c => /*#__PURE__*/React.createElement("div", {
               key: c.name,
               style: { display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid #1f1f1f" }
@@ -6315,7 +6321,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 score-breakdown-v1 */
+/* build:2026-05-02 tenbagger-criteria-v1 */
 </script>
 </body>
 </html>
