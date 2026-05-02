@@ -409,13 +409,10 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 #err{display:none;position:fixed;inset:0;background:#000;color:#ff5000;padding:24px;font-family:monospace;font-size:13px;white-space:pre-wrap;overflow:auto;z-index:9999;line-height:1.6}
 #err h2{color:#ff5000;font-size:16px;margin-bottom:12px;font-family:-apple-system,sans-serif}
 #err .hint{color:#aaa;font-size:12px;margin-top:16px;font-family:-apple-system,sans-serif}
-#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#a08a4f;font-size:14px;background:#faf6ec;z-index:1}
-#loading .brand-footer{position:fixed;bottom:24px;left:0;right:0;text-align:center;color:#a08a4f;font-size:10px;letter-spacing:2px;font-weight:600;opacity:0.7;font-family:-apple-system,'Helvetica Neue',sans-serif;}
 </style>
 </head>
 <body>
-<!-- splash-intro removed 2026-04-30: 로고 중복 표시 방지 -->
-<div id="loading">로딩 중...<div class="brand-footer">TA 자산운용</div></div>
+<!-- splash/intro/loading 모두 제거 2026-05-02: 인트로 화면 깨끗이 삭제 -->
 <div id="root"></div>
 <div id="err"></div>
 <script>
@@ -6067,7 +6064,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 company-eval-v1 */
+/* build:2026-05-02 no-intro */
 </script>
 </body>
 </html>
