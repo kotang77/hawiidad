@@ -1756,8 +1756,8 @@ function App() {
       const base64 = await prepImage(file);
       // 4) Claude Vision 호출
       const data = await callClaude({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1500,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
         system: `이미지에서 주식 포트폴리오를 추출해 JSON 배열로만 반환하세요.
 형식: [{"ticker":"PLTR","name":"팔란티어","shares":3300,"costBasis":265756,"price":154.87,"sector":"AI 데이터"}]
 - ticker: 영문 대문자 미국 티커
@@ -1969,7 +1969,7 @@ ${newsCtx || "-"}
     try {
       const data = await callClaude({
         model: "claude-sonnet-4-6",
-        max_tokens: 1500,
+        max_tokens: 1000,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }]
       });
@@ -2054,9 +2054,9 @@ ${newsCtx || "-"}
       })());
       const requiredCAGR = totalV > 0 ? (Math.pow(goal / totalV, 12 / Math.max(1, monthsLeft)) - 1) * 100 : 0;
       const userPrefLine = (userWatchlist && userWatchlist.length)
-        ? `\n- 사용자 관심 종목: ${userWatchlist.join(", ")} (newPicks 후보 우선 검토)` : "";
+        ? `\n- 사용자 관심 종목: ${userWatchlist.join(", ")}` : "";
       const userSectorLine = (userSectors && userSectors.length)
-        ? `\n- 사용자 관심 섹터: ${userSectors.join(", ")} (newPicks 섹터 가중)` : "";
+        ? `\n- 사용자 관심 섹터: ${userSectors.join(", ")}` : "";
       const system = `당신은 피터 틸 '제로투원' 철학으로 미국 주식 포트폴리오를 코칭하는 전문가입니다.
 - 사용자는 한국인 장기투자자(USD 자산, 원화 기반)${userName ? " · 호칭: " + userName : ""}
 - 목표: ${deadline}까지 ${Math.round(goal).toLocaleString()} USD
@@ -2068,20 +2068,15 @@ ${newsCtx || "-"}
   "summary": "이번 달 핵심 전략 1~2문장",
   "rebalance": [
     {"ticker":"기존보유티커","action":"증액|감축|유지|청산","currentWeight":숫자(%),"targetWeight":숫자(%),"reason":"한 문장"}
-  ],
-  "newPicks": [
-    {"ticker":"신규티커","name":"회사명","sector":"섹터","targetWeight":숫자(%),"why":"제로투원 관점 매수 근거 한 문장","risk":"리스크 한 문장","upside":"+30% 등"}
   ]
 }
 규칙:
-- rebalance: 현재 보유 종목 전체에 대해 평가
-- newPicks: 2~3개 (목표달성에 부족한 섹터/모멘텀을 보강할 신규 종목, 제로투원 독점 기준)
-- 비중 합이 100% 근처가 되도록 조정 (rebalance.target + newPicks.target)
-- **사용자 관심 종목/섹터가 명시되어 있다면 newPicks에 우선 반영하되, 제로투원 기준(독점·해자·모멘텀)을 충족하지 않으면 사유와 함께 제외**`;
+- rebalance: 현재 보유 종목 전체에 대해 평가 (신규 매수 추천 금지 — 보유 종목만)
+- 비중 합이 100% 근처가 되도록 조정`;
       const userMsg = `[현재 포트폴리오]\n${pfSummary}\n\n위 정보를 바탕으로 이번 달 목표 달성 전략을 JSON으로 산출해주세요.`;
       const data = await callClaude({
         model: "claude-sonnet-4-5",
-        max_tokens: 2500,
+        max_tokens: 1500,
         system,
         messages: [{ role: "user", content: userMsg }]
       });
@@ -2113,12 +2108,80 @@ ${newsCtx || "-"}
       setGoalStratLoading(false);
     }
   }, [portfolio, getPrice, goal, deadline, userName, userWatchlist, userSectors]);
-  // sim 탭 진입 시 캐시 미존재면 자동 로드 (이번 달 캐시는 그대로 사용)
+  // ============================================================
+  // 포트폴리오 ↔ __NEWS_DATA 자동 동기화 (orphan 즉시 제거 + goalStrategy 무효화)
+  //   - 사진 업로드뿐 아니라 수동 추가/삭제에도 자동 정리
+  //   - API 호출 없이 즉시 정리 (zeroStocks/scenarioRationale.tickers/stockNews/rebalance orphan)
+  //   - rebalance에 누락 종목이 생기면 goalStrategy 무효화 → sim 탭 진입 시 재호출
+  //   - scenarioRationale에 누락 종목이 생기면 자동 syncNewsToPortfolio (sim 탭 진입 시)
+  // ============================================================
+  const lastPortfolioSigRef = useRef(null);
   useEffect(() => {
-    if (tab === "sim" && !goalStrategy && !goalStratLoading) {
+    if (!Array.isArray(portfolio)) return;
+    const sig = portfolio.map(s => s.ticker).filter(Boolean).sort().join(",");
+    if (sig === lastPortfolioSigRef.current) return;
+    lastPortfolioSigRef.current = sig;
+    const ticks = new Set(portfolio.map(s => s.ticker).filter(Boolean));
+    const ND = (window.__NEWS_DATA = window.__NEWS_DATA || {});
+    let zeroDirty = false;
+    // 1) zeroStocks orphan 정리
+    if (Array.isArray(ND.zeroStocks)) {
+      const before = ND.zeroStocks.length;
+      ND.zeroStocks = ND.zeroStocks.filter(s => ticks.has(s.ticker));
+      if (ND.zeroStocks.length !== before) { zeroDirty = true; }
+    }
+    // 2) scenarioRationale.tickers orphan 정리
+    if (ND.scenarioRationale) {
+      ["conservative", "neutral", "optimistic"].forEach(k => {
+        const t = ND.scenarioRationale[k]?.tickers;
+        if (t) {
+          Object.keys(t).forEach(tk => {
+            if (!ticks.has(tk)) delete t[tk];
+          });
+        }
+      });
+    }
+    // 3) stockNews orphan 정리
+    if (ND.stockNews) {
+      Object.keys(ND.stockNews).forEach(tk => {
+        if (!ticks.has(tk)) delete ND.stockNews[tk];
+      });
+    }
+    // 4) goalStrategy: orphan 제거 + 누락 종목 검출 시 무효화
+    if (ND.goalStrategy && Array.isArray(ND.goalStrategy.rebalance)) {
+      const filtered = ND.goalStrategy.rebalance.filter(r => ticks.has(r.ticker));
+      const stratTickers = new Set(filtered.map(r => r.ticker));
+      const missing = [...ticks].filter(t => !stratTickers.has(t));
+      if (missing.length > 0) {
+        // 신규 종목 누락 → 무효화 (sim 탭 진입 시 재호출)
+        ND.goalStrategy = null;
+        setGoalStrategy(null);
+      } else if (filtered.length !== ND.goalStrategy.rebalance.length) {
+        // orphan만 제거 (누락 없음)
+        ND.goalStrategy = { ...ND.goalStrategy, rebalance: filtered };
+        setGoalStrategy(ND.goalStrategy);
+      }
+    }
+    if (zeroDirty) setZeroStocks([...(ND.zeroStocks || [])]);
+  }, [portfolio]);
+  // sim 탭 진입 시 캐시 미존재면 자동 로드 (이번 달 캐시는 그대로 사용)
+  // + scenarioRationale에 누락 티커 있으면 자동 syncNewsToPortfolio (API 키 있을 때만)
+  useEffect(() => {
+    if (tab !== "sim") return;
+    if (!goalStrategy && !goalStratLoading) {
       fetchGoalStrategy();
     }
-  }, [tab]);
+    // scenarioRationale 누락 티커 자동 보충
+    const ND = window.__NEWS_DATA;
+    if (ND?.scenarioRationale && Array.isArray(portfolio) && portfolio.length > 0 && getApiKey()) {
+      const sceneTickers = new Set(Object.keys(ND.scenarioRationale.neutral?.tickers || {}));
+      const missing = portfolio.filter(s => s.ticker && !sceneTickers.has(s.ticker));
+      if (missing.length > 0) {
+        // 비동기 호출, 에러는 무시 (UI에 영향 없음)
+        syncNewsToPortfolio(portfolio).catch(() => {});
+      }
+    }
+  }, [tab, portfolio]);
   const SECTORS = [{
     id: "ai",
     label: "🤖 AI",
@@ -2160,8 +2223,18 @@ ${newsCtx || "-"}
   // ===== 개별 종목 뉴스 실시간 갱신 =====
   // Claude API로 해당 티커의 최신 30일 주요 뉴스를 받아와
   // window.__NEWS_DATA.stockNews[ticker] 에 병합 (dedupe by title)
-  const refreshTickerNews = useCallback(async (ticker, companyName) => {
+  // TTL 캐시: 1시간 내 동일 티커 fetch 시 API 호출 생략 (토큰 절감)
+  const refreshTickerNews = useCallback(async (ticker, companyName, force = false) => {
     if (!ticker) return;
+    try {
+      const cacheKey = "ticker_news_ts_" + ticker;
+      const lastTs = parseInt(localStorage.getItem(cacheKey) || "0", 10);
+      if (!force && lastTs && (Date.now() - lastTs) < 3600000) {
+        // 1시간 내 갱신된 적 있음 → API 호출 skip
+        setTickerNewsLoading(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+        return;
+      }
+    } catch (e) {}
     setTickerNewsLoading(prev => ({ ...prev, [ticker]: true }));
     setTickerNewsError(prev => { const n = { ...prev }; delete n[ticker]; return n; });
     try {
@@ -2176,8 +2249,8 @@ ${newsCtx || "-"}
 - 5~10건 반환`;
       const user = `${ticker} (${companyName || ticker}) 의 최신 주요 뉴스를 JSON 배열로 주세요. ${todayStr} 기준 30일 이내. 한국어 요약.`;
       const data = await callClaude({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         system,
         messages: [{ role: "user", content: user }]
       });
@@ -2213,6 +2286,7 @@ ${newsCtx || "-"}
         window.__NEWS_DATA.lastUpdated = new Date().toISOString();
       }
       setTickerNewsRefreshed(prev => ({ ...prev, [ticker]: Date.now() }));
+      try { localStorage.setItem("ticker_news_ts_" + ticker, String(Date.now())); } catch (e) {}
     } catch (e) {
       let msg = e.message || "오류";
       if (e.code === "NO_API_KEY") msg = "API 키를 먼저 입력해주세요";
@@ -2296,8 +2370,8 @@ ${newsCtx || "-"}
       onProgress({ stage: "analyzing", current: i + 1, total: tickersNeedingSyn.length, ticker });
       try {
         const data = await callClaude({
-          model: "claude-sonnet-4-6",
-          max_tokens: 2500,
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1500,
           system: `당신은 미국 주식 ${ticker}에 대해 피터 틸 '제로투원' 독점 기준의 평가와 보수/중립/낙관 시나리오 근거를 동시에 산출하는 분석가입니다.
 ${(userWatchlist && userWatchlist.length) ? `사용자 관심 종목: ${userWatchlist.join(", ")}` : ""}
 ${(userSectors && userSectors.length) ? `사용자 관심 섹터: ${userSectors.join(", ")} (해당 섹터면 가중 분석)` : ""}
@@ -2581,10 +2655,10 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
     if (all.length === 0) { setNotesError("저장된 노트가 없습니다"); return; }
     setPrinciplesLoading(true);
     try {
-      const condensed = all.slice(0, 60).map(n => `[${n.type}${n.ticker ? "·" + n.ticker : ""}·${n.date.slice(0,10)}] ${n.content}`).join("\n");
+      const condensed = all.slice(0, 30).map(n => `[${n.type}${n.ticker ? "·" + n.ticker : ""}·${n.date.slice(0,10)}] ${n.content}`).join("\n");
       const data = await callClaude({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         system: `당신은 투자철학 코치입니다. 사용자의 투자 노트를 읽고 반복 등장하는 패턴을 추출해 "투자 원칙"으로 체계화하세요.
 JSON 배열만 반환 (마크다운 금지). 형식:
 [{"text":"원칙 한 줄(40자 내)","source":[관련노트id목록],"category":"매매/리스크/심리/종목선정"}]
@@ -2629,8 +2703,8 @@ JSON 배열만 반환 (마크다운 금지). 형식:
       const newsContext = Object.entries(ND.tickerAnalysis || {}).slice(0,7)
         .map(([k,v]) => `${k}: 시그널=${v.signal}, 목표${v.targetPrice} USD, ${v.why?.slice(0,80)}`).join("\n");
       const data = await callClaude({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         system: `당신은 투자 알람 시스템입니다. 사용자의 투자철학과 현재 보유/시장 상황을 비교해 "오늘 행동해야 할 것"이 있으면 알림을 생성하세요.
 JSON 배열만 반환 (마크다운 금지):
 [{"ticker":"PLTR","action":"매수/매도/관찰","priority":"high/medium/low","reason":"한 줄 이유(60자 내)","trigger":"어떤 원칙/뉴스에 매칭됐는지(40자 내)"}]
@@ -4599,20 +4673,23 @@ JSON 배열만 반환 (마크다운 금지):
     style: { fontSize: 12, color: R, padding: "8px 0", marginBottom: 6 }
   }, "\u26A0 ", goalStratError), goalStrategy && goalStrategy.summary && /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 12, color: "#bbb", lineHeight: 1.5, padding: "8px 10px", background: "#0a0a0a", borderRadius: 8, marginBottom: 12 }
-  }, goalStrategy.summary), goalStrategy && Array.isArray(goalStrategy.rebalance) && goalStrategy.rebalance.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, goalStrategy.summary), goalStrategy && Array.isArray(goalStrategy.rebalance) && (() => {
+    const filteredReb = goalStrategy.rebalance.filter(r => portfolio.some(s => s.ticker === r.ticker));
+    if (filteredReb.length === 0) return null;
+    return /*#__PURE__*/React.createElement("div", {
     style: { marginBottom: 14 }
   }, /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 11, fontWeight: 700, color: "#ddd", marginBottom: 6, letterSpacing: 0.5 }
   }, "\uD83D\uDCCA \uBE44\uC911 \uC870\uC815 \uCD94\uCC9C"), /*#__PURE__*/React.createElement("div", {
     style: { background: "#0a0a0a", borderRadius: 10, overflow: "hidden" }
-  }, goalStrategy.rebalance.map((r, i) => {
+  }, filteredReb.map((r, i) => {
     const aColor = r.action === "\uC99D\uC561" ? G : r.action === "\uAC10\uCD95" ? "#ffd60a" : r.action === "\uCCAD\uC0B0" ? R : "#888";
     const aBg = r.action === "\uC99D\uC561" ? "rgba(0,200,5,0.12)" : r.action === "\uAC10\uCD95" ? "rgba(255,213,10,0.12)" : r.action === "\uCCAD\uC0B0" ? "rgba(255,80,0,0.12)" : "#1a1a1a";
     return /*#__PURE__*/React.createElement("div", {
       key: r.ticker + "_" + i,
       style: {
         padding: "10px 12px",
-        borderBottom: i < goalStrategy.rebalance.length - 1 ? "1px solid #1a1a1a" : "none"
+        borderBottom: i < filteredReb.length - 1 ? "1px solid #1a1a1a" : "none"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }
@@ -4629,7 +4706,8 @@ JSON 배열만 반환 (마크다운 금지):
     }, (r.targetWeight ?? 0) + "%"))), r.reason && /*#__PURE__*/React.createElement("div", {
       style: { fontSize: 11, color: "#888", lineHeight: 1.4 }
     }, r.reason));
-  }))), goalStrategy && Array.isArray(goalStrategy.newPicks) && goalStrategy.newPicks.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  })));
+  })(), false && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 11, fontWeight: 700, color: "#ddd", marginBottom: 6, letterSpacing: 0.5 }
   }, "\u2728 \uC2E0\uADDC \uB9E4\uC218 \uCD94\uCC9C"), /*#__PURE__*/React.createElement("div", {
     style: { display: "grid", gap: 8 }
@@ -5292,7 +5370,7 @@ JSON 배열만 반환 (마크다운 금지):
       portfolioOrder.forEach(tk => {
         if (tickerNewsLoading[tk]) return;
         const pos = (portfolio || []).find(p => p.ticker === tk);
-        refreshTickerNews(tk, pos ? pos.name : tk);
+        refreshTickerNews(tk, pos ? pos.name : tk, true); // 수동 갱신은 캐시 무시
       });
     };
     return /*#__PURE__*/React.createElement("div", {
