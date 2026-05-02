@@ -923,6 +923,83 @@ const FMP_KEY = "IbFHosuKkJdgKFDNzRCGCp7LKpEPEKYH";
 const SYMBOL_ALIAS = {
   TSL3: ["TSL3.L", "3TSL.L", "TSL3.DE"]
 };
+// ============================================================
+// 티커 ↔ 기업 검증 (LLM hallucination 방지) — Finnhub profile2 + FMP search
+//   - LLM 분석 전에 반드시 실시간 API로 티커-기업 매핑 확정
+//   - resolveTicker 결과가 ground truth, Claude는 이 데이터로만 분석
+// ============================================================
+async function resolveTickerProfile(symbol) {
+  // Finnhub /stock/profile2 → ticker, name, exchange, finnhubIndustry, marketCapitalization
+  try {
+    const sym = symbol.toUpperCase().trim();
+    const r = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_KEY}`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || !d.ticker || !d.name) return null;
+    return {
+      ticker: d.ticker,
+      name: d.name,
+      exchange: d.exchange || "",
+      industry: d.finnhubIndustry || "",
+      country: d.country || "",
+      marketCap: d.marketCapitalization || 0,
+      currency: d.currency || "USD",
+      ipo: d.ipo || "",
+      weburl: d.weburl || ""
+    };
+  } catch (e) {
+    return null;
+  }
+}
+async function searchTickerByName(query) {
+  // FMP /search → 회사명/부분 매치로 티커 후보 검색
+  try {
+    const r = await fetch(`https://financialmodelingprep.com/api/v3/search?query=${encodeURIComponent(query)}&limit=8&apikey=${FMP_KEY}`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!r.ok) return [];
+    const arr = await r.json();
+    if (!Array.isArray(arr)) return [];
+    // 미국 거래소 우선 + 일반 주식만 (ETF 제외 안 함, 사용자 선택)
+    return arr
+      .filter(x => x.symbol && x.name)
+      .map(x => ({ ticker: x.symbol, name: x.name, exchange: x.stockExchange || "", currency: x.currency || "" }));
+  } catch (e) {
+    return [];
+  }
+}
+async function resolveCompanyInput(rawInput) {
+  // 사용자 입력 → {ticker, name, industry, exchange, ...} 검증된 프로필 반환 (또는 null)
+  // 1) 티커 형태(1~5자 영문 + 옵션 .EXCHANGE) → 직접 Finnhub
+  // 2) 그 외 → FMP 검색 → 최상위 후보의 Finnhub profile
+  const q = rawInput.trim();
+  if (!q) return { error: "입력값 없음" };
+  const tickerLike = /^[A-Za-z]{1,5}(\.[A-Za-z]{1,4})?$/.test(q);
+  if (tickerLike) {
+    const profile = await resolveTickerProfile(q);
+    if (profile) return { profile, source: "ticker_direct", candidates: [] };
+    // 티커처럼 보이지만 못찾은 경우 → name 검색도 시도
+  }
+  // 회사명 검색
+  const candidates = await searchTickerByName(q);
+  if (candidates.length === 0) {
+    return tickerLike
+      ? { error: `티커 "${q.toUpperCase()}"를 찾을 수 없습니다. 정확한 미국 거래소 심볼인지 확인해주세요.` }
+      : { error: `회사명 "${q}"에 해당하는 종목을 찾을 수 없습니다. 영문 회사명이나 티커를 입력해보세요.` };
+  }
+  // 최상위 후보의 프로필 가져오기 (이름 매치도가 가장 좋은 것)
+  const top = candidates[0];
+  const profile = await resolveTickerProfile(top.ticker);
+  if (profile) return { profile, source: "name_search", candidates: candidates.slice(1, 5) };
+  // 프로필 못 찾으면 검색 결과 자체를 프로필로
+  return {
+    profile: { ticker: top.ticker, name: top.name, exchange: top.exchange, industry: "", country: "", marketCap: 0, currency: top.currency || "USD", ipo: "", weburl: "" },
+    source: "search_only",
+    candidates: candidates.slice(1, 5)
+  };
+}
 async function _fetchFH(sym) {
   const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`, {
     signal: AbortSignal.timeout(5000)
@@ -2662,18 +2739,45 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
     if (!getApiKey()) { setCompanyAnalysisError("API 키를 먼저 등록하세요"); return; }
     setCompanyAnalysisLoading(true);
     try {
+      // === STEP 1: 티커 ↔ 기업 검증 (Finnhub/FMP API) ===
+      // LLM이 잘못된 회사로 매핑하는 것을 방지하기 위해, 분석 전에 반드시 실시간 API로 확정
+      const resolved = await resolveCompanyInput(query);
+      if (resolved.error) {
+        throw new Error(resolved.error);
+      }
+      const profile = resolved.profile;
+      if (!profile || !profile.ticker || !profile.name) {
+        throw new Error("티커-기업 매칭 실패. 정확한 미국 티커(예: NVDA, PLTR) 또는 영문 회사명을 입력해주세요.");
+      }
+      // === STEP 2: 검증된 프로필을 ground truth로 Claude에 전달 ===
       const heldList = (portfolio || []).map(p => `${p.ticker}(${p.name})`).join(", ") || "(보유 종목 없음)";
+      const candidatesNote = (resolved.candidates && resolved.candidates.length > 0)
+        ? `\n[기타 검색 후보 — 참고만, 분석 대상 아님: ${resolved.candidates.map(c => c.ticker + "(" + c.name + ")").join(", ")}]`
+        : "";
       const data = await callClaude({
         model: "claude-sonnet-4-5",
         max_tokens: 1800,
         system: `당신은 피터 틸 '제로투원' 6대 기준으로 미국주식을 평가하는 전문 애널리스트입니다.
-사용자가 제시한 회사를 6대 기준으로 채점하고 종합 평가를 제공하세요.
+
+⚠️ 절대 규칙 (위반 시 응답 무효):
+사용자가 제시한 회사는 다음과 같이 외부 데이터(Finnhub/FMP)로 확정되었습니다.
+이 회사만 분석하고, 절대 다른 회사로 바꾸지 마세요. ticker/name 필드는 반드시 아래 값과 100% 동일하게 응답하세요.
+
+[확정된 분석 대상 — 변경 금지]
+- ticker: ${profile.ticker}
+- 회사명: ${profile.name}
+- 거래소: ${profile.exchange || "N/A"}
+- 산업: ${profile.industry || "N/A"}
+- 국가: ${profile.country || "N/A"}
+- 시가총액: ${profile.marketCap ? Number(profile.marketCap).toFixed(0) + " 백만 USD" : "N/A"}
+
+만약 위 회사를 잘 모르거나 분석 데이터가 부족하면, scores를 null로 두고 summary에 "데이터 부족" 명시. 절대 다른 비슷한 이름의 회사로 바꿔서 분석하지 마세요.
 
 반드시 유효한 JSON만 반환 (코드펜스/설명 금지). 스키마:
 {
-  "ticker": "심볼(예: NVDA)",
-  "name": "정식 회사명",
-  "sector": "섹터(한글)",
+  "ticker": "${profile.ticker}",
+  "name": "${profile.name}",
+  "sector": "섹터(한글, ${profile.industry || '확정된 산업'} 기반)",
   "marketCap": "대형주|중형주|소형주",
   "currentPrice": 숫자(USD, 모르면 null),
   "scores": {
@@ -2704,21 +2808,32 @@ JSON 한 객체만 반환 (마크다운/설명/코드펜스 금지).
 규칙:
 - 모든 score는 정수
 - totalScore = 6개 score의 합
-- 보유 종목과 시너지 가능하면 명시 (보유: ${heldList})
-- 회사를 모를 경우 ticker에 "UNKNOWN" 반환하고 sector/scores는 null`,
+- ticker/name 필드는 반드시 확정된 값(${profile.ticker}/${profile.name}) 그대로 — 임의로 변경 금지
+- 보유 종목과 시너지 가능하면 명시 (보유: ${heldList})`,
         messages: [{
           role: "user",
-          content: `다음 회사를 제로투원 6대 기준으로 평가해주세요: "${query}"`
+          content: `다음 회사를 제로투원 6대 기준으로 평가해주세요.\n\n[확정된 분석 대상]\n- ticker: ${profile.ticker}\n- 회사명: ${profile.name}\n- 거래소: ${profile.exchange || 'N/A'}\n- 산업: ${profile.industry || 'N/A'}${candidatesNote}\n\n위 회사만 평가하세요.`
         }]
       });
       const raw = (data.content || []).map(c => c.text || "").join("").trim();
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
       const m = cleaned.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(m ? m[0] : cleaned);
-      if (parsed.ticker === "UNKNOWN" || !parsed.scores) {
-        throw new Error("해당 회사 정보를 찾을 수 없습니다. 정확한 회사명/티커를 확인해주세요.");
+      if (!parsed.scores) {
+        throw new Error(`Claude가 ${profile.ticker}(${profile.name})에 대한 충분한 분석 데이터를 제공하지 못했습니다.`);
       }
-      const result = { ...parsed, query, generatedAt: new Date().toISOString() };
+      // === STEP 3: 검증된 프로필로 ticker/name 강제 덮어쓰기 (안전장치) ===
+      const result = {
+        ...parsed,
+        ticker: profile.ticker,        // ← API 검증 값으로 강제
+        name: profile.name,            // ← API 검증 값으로 강제
+        sector: parsed.sector || profile.industry || "—",
+        verifiedSource: resolved.source,
+        verifiedExchange: profile.exchange,
+        verifiedIndustry: profile.industry,
+        query: query,
+        generatedAt: new Date().toISOString()
+      };
       setCompanyAnalysis(result);
       try { localStorage.setItem("company_analysis_v1", JSON.stringify(result)); } catch (e) {}
     } catch (err) {
@@ -6064,7 +6179,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 no-intro */
+/* build:2026-05-02 ticker-match-v1 */
 </script>
 </body>
 </html>
