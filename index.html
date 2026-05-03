@@ -409,6 +409,79 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 #err{display:none;position:fixed;inset:0;background:#000;color:#ff5000;padding:24px;font-family:monospace;font-size:13px;white-space:pre-wrap;overflow:auto;z-index:9999;line-height:1.6}
 #err h2{color:#ff5000;font-size:16px;margin-bottom:12px;font-family:-apple-system,sans-serif}
 #err .hint{color:#aaa;font-size:12px;margin-top:16px;font-family:-apple-system,sans-serif}
+
+/* ===== Responsive Typography (2026-05-03) =====
+ * 좁은 화면(<400/360/340px)에서 인라인 px 폰트를 단계적으로 축소해
+ * 텍스트 줄바꿈으로 인한 레이아웃 깨짐 방지.
+ * React가 inline style을 'font-size: 14px' 형태로 출력하므로
+ * attribute selector [style*="font-size: Npx"]로 매칭 + !important로 우선 적용.
+ */
+
+/* Flex 자식 요소 축소 허용 — 자식이 부모보다 작아질 수 있게 */
+[style*="display: flex"] > *,
+[style*="display:flex"] > *,
+[style*="display: grid"] > *,
+[style*="display:grid"] > * {
+  min-width: 0;
+}
+
+/* ≤ 400px (소형 폰: iPhone 12 mini, 일부 안드로이드) — 약 -10% 축소 */
+@media (max-width: 400px) {
+  [style*="font-size: 32px"] { font-size: 27px !important; }
+  [style*="font-size: 28px"] { font-size: 24px !important; }
+  [style*="font-size: 26px"] { font-size: 22px !important; }
+  [style*="font-size: 24px"] { font-size: 20px !important; }
+  [style*="font-size: 22px"] { font-size: 19px !important; }
+  [style*="font-size: 20px"] { font-size: 17px !important; }
+  [style*="font-size: 18px"] { font-size: 16px !important; }
+  [style*="font-size: 16px"] { font-size: 14.5px !important; }
+  [style*="font-size: 15px"] { font-size: 13.5px !important; }
+  [style*="font-size: 14px"] { font-size: 12.5px !important; }
+  [style*="font-size: 13px"] { font-size: 12px !important; }
+  [style*="font-size: 12px"] { font-size: 11px !important; }
+  [style*="font-size: 11px"] { font-size: 10.5px !important; }
+  [style*="font-size: 10px"] { font-size: 9.5px !important; }
+}
+
+/* ≤ 360px (Galaxy S 시리즈 일부) — 약 -18% */
+@media (max-width: 360px) {
+  [style*="font-size: 32px"] { font-size: 25px !important; }
+  [style*="font-size: 28px"] { font-size: 22px !important; }
+  [style*="font-size: 26px"] { font-size: 20px !important; }
+  [style*="font-size: 24px"] { font-size: 18px !important; }
+  [style*="font-size: 22px"] { font-size: 17px !important; }
+  [style*="font-size: 20px"] { font-size: 15px !important; }
+  [style*="font-size: 18px"] { font-size: 14.5px !important; }
+  [style*="font-size: 16px"] { font-size: 13px !important; }
+  [style*="font-size: 15px"] { font-size: 12.5px !important; }
+  [style*="font-size: 14px"] { font-size: 11.5px !important; }
+  [style*="font-size: 13px"] { font-size: 11px !important; }
+  [style*="font-size: 12px"] { font-size: 10.5px !important; }
+  [style*="font-size: 11px"] { font-size: 10px !important; }
+  [style*="font-size: 10px"] { font-size: 9px !important; }
+  /* 패딩도 약간 축소 */
+  [style*='padding: "16px 18px"'] { padding: 12px 14px !important; }
+  [style*='padding: "14px 16px"'] { padding: 11px 13px !important; }
+  [style*='padding: "12px 14px"'] { padding: 10px 12px !important; }
+}
+
+/* ≤ 340px (Galaxy Fold 좁은 모드 등) — 약 -28% */
+@media (max-width: 340px) {
+  [style*="font-size: 32px"] { font-size: 22px !important; }
+  [style*="font-size: 28px"] { font-size: 20px !important; }
+  [style*="font-size: 26px"] { font-size: 18px !important; }
+  [style*="font-size: 24px"] { font-size: 16px !important; }
+  [style*="font-size: 22px"] { font-size: 15px !important; }
+  [style*="font-size: 20px"] { font-size: 14px !important; }
+  [style*="font-size: 18px"] { font-size: 13px !important; }
+  [style*="font-size: 16px"] { font-size: 12px !important; }
+  [style*="font-size: 15px"] { font-size: 11.5px !important; }
+  [style*="font-size: 14px"] { font-size: 11px !important; }
+  [style*="font-size: 13px"] { font-size: 10.5px !important; }
+  [style*="font-size: 12px"] { font-size: 10px !important; }
+  [style*="font-size: 11px"] { font-size: 9.5px !important; }
+  [style*="font-size: 10px"] { font-size: 9px !important; }
+}
 </style>
 </head>
 <body>
@@ -6401,7 +6474,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-03 lift-card-state-v1 */
+/* build:2026-05-03 responsive-typo-v1 */
 </script>
 </body>
 </html>
