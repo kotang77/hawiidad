@@ -1482,6 +1482,13 @@ function App() {
   }, [zeroStocks]);
   // 종목별 세부 점수 fetch 상태: ticker → "loading" | "ok" | "error" | undefined
   const [breakdownLoading, setBreakdownLoading] = useState({});
+  // ★ ZeroCard 펼친 카드 추적 (App-level state) — 백그라운드 sync로 인한 자동 닫힘 방지
+  //   ZeroCard가 App 내부에 정의돼 있어 리렌더 시 컴포넌트가 새로 생성됨 → 내부 useState 리셋됨
+  //   상태를 부모로 끌어올려 ticker 키로 보존
+  const [openCards, setOpenCards] = useState({});  // {ticker: true | undefined}
+  const toggleCard = useCallback((ticker) => {
+    setOpenCards(p => ({ ...p, [ticker]: !p[ticker] }));
+  }, []);
   const [zeroLoading, setZeroLoading] = useState(false);
   const [zeroLastFetch, setZeroLastFetch] = useState(null);
   const [zeroError, setZeroError] = useState("");
@@ -3157,9 +3164,13 @@ JSON 배열만 반환 (마크다운 금지):
   const ZeroCard = ({
     s,
     isSearch = false,
-    livePrice
+    livePrice,
+    isOpen = false,
+    onToggle = () => {}
   }) => {
-    const [showCriteria, setShowCriteria] = useState(false);
+    // showCriteria/setShowCriteria는 부모로 lift up됨 (props isOpen/onToggle 사용)
+    const showCriteria = isOpen;
+    const setShowCriteria = onToggle;
     const mc = moatColor(s.monopoly);
     const sc = scoreColor(s.zeroScore);
     const si = sigStyle(s.signal);
@@ -3231,7 +3242,7 @@ JSON 배열만 반환 (마크다운 금지):
         textAlign: "right"
       }
     }, /*#__PURE__*/React.createElement("div", {
-      onClick: () => setShowCriteria(v => !v),
+      onClick: () => setShowCriteria(),
       title: "\uD074\uB9AD: \uD3C9\uAC00 \uAE30\uC900 \uBCF4\uAE30",
       style: {
         fontSize: 26,
@@ -5628,7 +5639,9 @@ JSON 배열만 반환 (마크다운 금지):
       ...portfolioCards.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
         key: "h-" + s.ticker,
         s: s,
-        livePrice: livePrices[s.ticker]
+        livePrice: livePrices[s.ticker],
+        isOpen: !!openCards[s.ticker],
+        onToggle: () => toggleCard(s.ticker)
       })),
       curatedCards.length > 0 && /*#__PURE__*/React.createElement("div", {
         key: "h-cur",
@@ -5637,7 +5650,9 @@ JSON 배열만 반환 (마크다운 금지):
       ...curatedCards.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
         key: "c-" + s.ticker,
         s: s,
-        livePrice: livePrices[s.ticker]
+        livePrice: livePrices[s.ticker],
+        isOpen: !!openCards[s.ticker],
+        onToggle: () => toggleCard(s.ticker)
       }))
     ].filter(Boolean);
   })(), !zeroLoading && zeroStocks.length === 0 && (!portfolio || portfolio.length === 0) && !zeroError && /*#__PURE__*/React.createElement("div", {
@@ -6386,7 +6401,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 holdings-always-visible-v1 */
+/* build:2026-05-03 lift-card-state-v1 */
 </script>
 </body>
 </html>
