@@ -7,7 +7,7 @@
  *  - Navigation fallback: if offline → serve cached index.html
  */
 
-const CACHE_VERSION = "v31.2026-05-02-tenbagger-criteria";
+const CACHE_VERSION = "v32.2026-05-02-holdings-always";
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-${CACHE_VERSION}`;
 

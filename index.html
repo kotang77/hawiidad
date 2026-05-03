@@ -1465,7 +1465,21 @@ function App() {
       window.removeEventListener("appinstalled", onInst);
     };
   }, []);
-  const [zeroStocks, setZeroStocks] = useState([]);
+  const [zeroStocks, setZeroStocks] = useState(() => {
+    try {
+      const cached = localStorage.getItem("zero_stocks_v1");
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
+  // zeroStocks 변경 시 localStorage 영속화 (refresh 후에도 보유종목 카드 즉시 노출)
+  useEffect(() => {
+    try {
+      if (Array.isArray(zeroStocks) && zeroStocks.length > 0) {
+        localStorage.setItem("zero_stocks_v1", JSON.stringify(zeroStocks));
+      }
+    } catch (e) {}
+  }, [zeroStocks]);
   // 종목별 세부 점수 fetch 상태: ticker → "loading" | "ok" | "error" | undefined
   const [breakdownLoading, setBreakdownLoading] = useState({});
   const [zeroLoading, setZeroLoading] = useState(false);
@@ -2168,8 +2182,18 @@ ${newsCtx || "-"}
   }, []);
   // (fetchZeroSearch 제거됨 — 개별 종목 분석 UI 삭제에 따라)
   useEffect(() => {
-    if (tab === "ai" && zeroStocks.length === 0 && !zeroLoading) fetchZeroStocks();
-  }, [tab]);
+    if (tab !== "ai") return;
+    if (zeroStocks.length === 0 && !zeroLoading) fetchZeroStocks();
+    // 보유종목 중 zeroStocks에 없는 것 자동 sync (API 키 있을 때만, 백그라운드)
+    if (Array.isArray(portfolio) && portfolio.length > 0 && getApiKey()) {
+      const have = new Set((zeroStocks || []).map(s => s.ticker));
+      const missing = portfolio.filter(p => p.ticker && !have.has(p.ticker));
+      if (missing.length > 0) {
+        // 비동기, 에러 무시 (UI 영향 없음)
+        syncNewsToPortfolio(portfolio).catch(() => {});
+      }
+    }
+  }, [tab, portfolio, zeroStocks.length]);
   // 100억 뉴스 탭 진입 시: 이번 주 추천이 없거나 지난 주 것이면 자동 갱신
   useEffect(() => {
     if (tab !== "zero") return;
@@ -2283,12 +2307,11 @@ ${newsCtx || "-"}
     const ticks = new Set(portfolio.map(s => s.ticker).filter(Boolean));
     const ND = (window.__NEWS_DATA = window.__NEWS_DATA || {});
     let zeroDirty = false;
-    // 1) zeroStocks orphan 정리
-    if (Array.isArray(ND.zeroStocks)) {
-      const before = ND.zeroStocks.length;
-      ND.zeroStocks = ND.zeroStocks.filter(s => ticks.has(s.ticker));
-      if (ND.zeroStocks.length !== before) { zeroDirty = true; }
-    }
+    // 1) zeroStocks: orphan 제거 비활성화 — 큐레이션 픽(보유 외)도 보존
+    //    UI는 포트폴리오 우선 렌더, 추천 픽은 뒤로 분리 (사용자 요청: 보유종목 항상 노출)
+    //    if (Array.isArray(ND.zeroStocks)) {
+    //      ND.zeroStocks = ND.zeroStocks.filter(s => ticks.has(s.ticker));
+    //    }
     // 2) scenarioRationale.tickers orphan 정리
     if (ND.scenarioRationale) {
       ["conservative", "neutral", "optimistic"].forEach(k => {
@@ -2497,11 +2520,8 @@ ${newsCtx || "-"}
     });
     const portfolioTickers = new Set(newPortfolio.map(s => s.ticker).filter(Boolean));
     const tickerToInfo = Object.fromEntries(newPortfolio.map(s => [s.ticker, s]));
-    // 1) 고아(orphan) 정리: 포트폴리오에 없는 티커 제거
+    // 1) 고아(orphan) 정리: zeroStocks는 보존 (큐레이션 픽 살림), 다른 필드만 정리
     let removed = 0;
-    const beforeZero = ND.zeroStocks.length;
-    ND.zeroStocks = ND.zeroStocks.filter(s => portfolioTickers.has(s.ticker));
-    removed += beforeZero - ND.zeroStocks.length;
     ["conservative", "neutral", "optimistic"].forEach(k => {
       const t = ND.scenarioRationale[k].tickers;
       Object.keys(t).forEach(ticker => {
@@ -3221,7 +3241,7 @@ JSON 배열만 반환 (마크다운 금지):
         cursor: "pointer",
         userSelect: "none"
       }
-    }, s.zeroScore, /*#__PURE__*/React.createElement("span", {
+    }, (s.zeroScore == null || s.zeroScore === "") ? "—" : s.zeroScore, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
         color: "#555",
@@ -5571,11 +5591,56 @@ JSON 배열만 반환 (마크다운 금지):
       cursor: "pointer",
       textDecoration: "underline"
     }
-  }, "\uC7AC\uC2DC\uB3C4")), !zeroLoading && zeroStocks.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
-    key: i,
-    s: s,
-    livePrice: livePrices[s.ticker]
-  })), !zeroLoading && zeroStocks.length === 0 && !zeroError && /*#__PURE__*/React.createElement("div", {
+  }, "\uC7AC\uC2DC\uB3C4")), !zeroLoading && (() => {
+    // ★ 보유종목 항상 노출: 포트폴리오 우선 렌더 + 누락 종목은 stub 카드 + 추천 픽은 뒤
+    const zeroByTicker = {};
+    (zeroStocks || []).forEach(z => { if (z && z.ticker) zeroByTicker[z.ticker] = z; });
+    const portfolioCards = (portfolio || []).filter(p => p && p.ticker).map(p => {
+      const z = zeroByTicker[p.ticker];
+      if (z) return { ...z, _isHolding: true };
+      // stub: 분석 데이터 없으면 portfolio 기반 placeholder
+      return {
+        ticker: p.ticker,
+        name: p.name || p.ticker,
+        sector: p.sector || "—",
+        marketCap: p.marketCap || "—",
+        currentPrice: livePrices[p.ticker] || p.price || 0,
+        targetPrice: 0,
+        signal: "분석대기",
+        zeroScore: null,
+        monopoly: "—",
+        moat: "AI 분석 미완료 — 카드 펼친 후 'AI로 항목별 득점 분석' 클릭",
+        why: "",
+        risk: "",
+        upside: "",
+        verdict: "",
+        _isHolding: true,
+        _isStub: true
+      };
+    });
+    const heldTickers = new Set(portfolioCards.map(c => c.ticker));
+    const curatedCards = (zeroStocks || []).filter(z => z && z.ticker && !heldTickers.has(z.ticker)).map(z => ({ ...z, _isHolding: false }));
+    return [
+      portfolioCards.length > 0 && /*#__PURE__*/React.createElement("div", {
+        key: "h-hold",
+        style: { fontSize: 11, color: "#888", letterSpacing: 1.2, fontWeight: 700, marginBottom: 8, marginTop: 4 }
+      }, "📊 보유 종목 분석 (" + portfolioCards.length + ")"),
+      ...portfolioCards.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
+        key: "h-" + s.ticker,
+        s: s,
+        livePrice: livePrices[s.ticker]
+      })),
+      curatedCards.length > 0 && /*#__PURE__*/React.createElement("div", {
+        key: "h-cur",
+        style: { fontSize: 11, color: "#888", letterSpacing: 1.2, fontWeight: 700, marginBottom: 8, marginTop: 14 }
+      }, "🔍 오늘의 추천 픽 (" + curatedCards.length + ")"),
+      ...curatedCards.map((s, i) => /*#__PURE__*/React.createElement(ZeroCard, {
+        key: "c-" + s.ticker,
+        s: s,
+        livePrice: livePrices[s.ticker]
+      }))
+    ].filter(Boolean);
+  })(), !zeroLoading && zeroStocks.length === 0 && (!portfolio || portfolio.length === 0) && !zeroError && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "40px 0",
@@ -6321,7 +6386,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-02 tenbagger-criteria-v1 */
+/* build:2026-05-02 holdings-always-visible-v1 */
 </script>
 </body>
 </html>
