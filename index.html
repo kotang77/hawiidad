@@ -482,10 +482,43 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   [style*="font-size: 11px"] { font-size: 9.5px !important; }
   [style*="font-size: 10px"] { font-size: 9px !important; }
 }
+
+/* ===== Intro Splash (2026-05-04) =====
+ * 검은 배경 + 로고 1.5초 (1.2s 표시 + 0.3s 페이드아웃) → 대시보드로 전환 */
+#intro {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+  opacity: 1;
+  animation: introFade 1.5s ease-in-out forwards;
+  pointer-events: none;
+}
+#intro img {
+  width: 60vw;
+  max-width: 280px;
+  height: auto;
+  opacity: 0;
+  animation: introLogo 1.5s ease-in-out forwards;
+}
+@keyframes introFade {
+  0%, 80% { opacity: 1; }
+  100%    { opacity: 0; visibility: hidden; }
+}
+@keyframes introLogo {
+  0%   { opacity: 0; transform: scale(0.92); }
+  20%  { opacity: 1; transform: scale(1); }
+  80%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
 </style>
 </head>
 <body>
-<!-- splash/intro/loading 모두 제거 2026-05-02: 인트로 화면 깨끗이 삭제 -->
+<!-- 인트로 스플래시 2026-05-04: 검은 배경 + 로고 1.5초 → 대시보드 -->
+<div id="intro"><img src="intro-logo.png?v=8" alt="" /></div>
 <div id="root"></div>
 <div id="err"></div>
 <script>
@@ -502,6 +535,11 @@ window.addEventListener('unhandledrejection', function(e){
   window.__showErr('Promise rejection: '+(e.reason&&e.reason.message||e.reason));
 });
 setTimeout(function(){
+  // 1.5초 후 인트로 DOM 제거 (애니메이션 완료 시점)
+  setTimeout(function(){
+    var i = document.getElementById('intro');
+    if (i && i.parentNode) i.parentNode.removeChild(i);
+  }, 1500);
   if(typeof React==='undefined'||typeof ReactDOM==='undefined'){
     var miss=[];
     if(typeof React==='undefined') miss.push('React');
@@ -6561,7 +6599,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-03 sector-analyst-report-v1 */
+/* build:2026-05-04 intro-splash-v1 */
 </script>
 </body>
 </html>
