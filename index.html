@@ -3193,14 +3193,51 @@ ${sector.name} 섹터에 대해 최근 30일 핫뉴스를 종합해 정식 리�
 
       const data = await callClaude({
         model: "claude-sonnet-4-5",
-        max_tokens: 3000,
+        max_tokens: 4500,
         system,
         messages: [{ role: "user", content: userMsg }]
       });
+      // ===== 견고한 JSON 파싱 (LLM 결과 자주 나타나는 syntax 오류 자동 보정) =====
       const raw = (data.content || []).map(c => c.text || "").join("").trim();
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-      const m = cleaned.match(/\{[\s\S]*\}/);
-      const report = JSON.parse(m ? m[0] : cleaned);
+      let cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      const objMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (objMatch) cleaned = objMatch[0];
+      // JSON repair 함수: 흔한 LLM 실수 자동 수정
+      const repairJson = (s) => {
+        let r = s;
+        // 1) 제어문자(0x00-0x1F, 0x7F) 제거 (단, \n \r \t는 string escape 처리됨)
+        // string 내부의 raw newline은 사실 LLM 출력에서 흔치 않으므로 패스
+        // 2) 객체/배열 사이 누락 콤마: } { → },{ ]  [ → ],[ } [ → },[ ] { → ],{
+        r = r.replace(/}(\s*)({)/g, "},$1$2");
+        r = r.replace(/](\s*)(\[)/g, "],$1$2");
+        r = r.replace(/}(\s*)(\[)/g, "},$1$2");
+        r = r.replace(/](\s*)({)/g, "],$1$2");
+        // 3) 문자열-키/값 사이 콤마 누락: "..." "..." → "...", "..." (단순 휴리스틱)
+        r = r.replace(/"(\s*\n\s*)"/g, '",$1"');
+        // 4) trailing comma 제거: ,] ,} → ] }
+        r = r.replace(/,(\s*[\]}])/g, "$1");
+        return r;
+      };
+      let report;
+      let parseErr = null;
+      try {
+        report = JSON.parse(cleaned);
+      } catch (e1) {
+        parseErr = e1;
+        // 1차 repair
+        try {
+          report = JSON.parse(repairJson(cleaned));
+          console.warn("[philosophy] JSON repaired (1st pass):", e1.message);
+        } catch (e2) {
+          // 2차 repair (반복)
+          try {
+            report = JSON.parse(repairJson(repairJson(cleaned)));
+            console.warn("[philosophy] JSON repaired (2nd pass):", e2.message);
+          } catch (e3) {
+            throw new Error("JSON 파싱 실패 (자동 보정 실패): " + (parseErr.message || ""));
+          }
+        }
+      }
       if (!report || !Array.isArray(report.themes)) throw new Error("응답에 themes 누락");
       report.generatedAt = new Date().toISOString();
       report.usedChatContext = !!chatCtx;
@@ -6754,7 +6791,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-06 philosophy-report-v1 */
+/* build:2026-05-07 philosophy-report-v2 */
 </script>
 </body>
 </html>
