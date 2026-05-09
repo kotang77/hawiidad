@@ -1026,7 +1026,15 @@ const DEFAULT_RATES = {
   POET: 20,
   CRCL: 20,
   IONQ: 25,
-  TSL3: -20
+  TSL3: -20,
+  // 신규 보유 종목 기본 성장률 (텐배거 잠재력 기반)
+  KOPN: 35,    // 마이크로 디스플레이, 변동성 큼
+  RKLB: 40,    // 우주 발사 — 고성장 가능
+  IREN: 30,    // 비트코인 마이닝 + AI 데이터센터
+  SPIR: 35,    // 위성 데이터, 소형주 변동성
+  DXYZ: 25,    // 데스티니 ETF (private 노출)
+  // 일반 디폴트 (테이블에 없으면 사용)
+  _default: 20
 };
 const FINNHUB_KEY = "d7bq4f1r01qom0rbrmkgd7bq4f1r01qom0rbrml0";
 const FMP_KEY = "IbFHosuKkJdgKFDNzRCGCp7LKpEPEKYH";
@@ -1784,6 +1792,27 @@ function App() {
   useEffect(() => {
     saveUserSettings({ appTitle, goal, deadline, stockRates, userName, userWatchlist, userSectors });
   }, [appTitle, goal, deadline, stockRates, userName, userWatchlist, userSectors]);
+  // ===== 신규 보유 종목의 stockRates 자동 채움 =====
+  // OCR/수동 추가/외부 동기화로 들어온 종목이 stockRates에 없거나 0이면
+  // DEFAULT_RATES 매칭 값 또는 _default(20%) 로 자동 설정 (시나리오 0% 표시 방지)
+  useEffect(() => {
+    if (!Array.isArray(portfolio) || portfolio.length === 0) return;
+    setStockRates(prev => {
+      const next = { ...prev };
+      let changed = false;
+      portfolio.forEach(s => {
+        if (!s || !s.ticker) return;
+        const cur = next[s.ticker];
+        // undefined, null, 또는 0 (사용자가 명시적 0 설정도 가능하지만 신규는 거의 누락 케이스)
+        // 0인 경우만 fallback (음수는 사용자 의도로 보존 — 예: TSL3 -20)
+        if (cur === undefined || cur === null) {
+          next[s.ticker] = (DEFAULT_RATES[s.ticker] !== undefined) ? DEFAULT_RATES[s.ticker] : (DEFAULT_RATES._default || 20);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [portfolio]);
   const getPrice = useCallback(s => livePrices[s.ticker] ?? s.price, [livePrices]);
   const rate = manualRate || usdKrw;
   // 통화 토글에 따라 USD 또는 원화로 표기 (rate 없으면 USD로 fallback)
@@ -1956,7 +1985,7 @@ function App() {
     }]);
     setStockRates(p => ({
       ...p,
-      [ticker]: 20
+      [ticker]: (DEFAULT_RATES[ticker] !== undefined) ? DEFAULT_RATES[ticker] : 20
     }));
     setNewStock(EMPTY);
     setAddError("");
@@ -2113,8 +2142,9 @@ JSON 배열 하나만, 마크다운/설명 금지. 종목 없으면 [].`,
       setStockRates(prev => {
         const next = { ...prev };
         cleaned.forEach(s => {
-          if (next[s.ticker] === undefined || next[s.ticker] === null) {
-            next[s.ticker] = 20; // 연간 +20% 기본 가정 (handleAdd 와 동일)
+          // undefined/null/0(미설정 추정)인 경우 DEFAULT_RATES 우선, 없으면 20%
+          if (next[s.ticker] === undefined || next[s.ticker] === null || next[s.ticker] === 0) {
+            next[s.ticker] = (DEFAULT_RATES[s.ticker] !== undefined) ? DEFAULT_RATES[s.ticker] : 20;
           }
         });
         return next;
@@ -6918,7 +6948,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-08 cost-basis-autofix-v1 */
+/* build:2026-05-09 scenario-rate-autofill-v1 */
 </script>
 </body>
 </html>
