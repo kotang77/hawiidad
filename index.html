@@ -1803,11 +1803,20 @@ function App() {
       portfolio.forEach(s => {
         if (!s || !s.ticker) return;
         const cur = next[s.ticker];
-        // undefined, null, 또는 0 (사용자가 명시적 0 설정도 가능하지만 신규는 거의 누락 케이스)
-        // 0인 경우만 fallback (음수는 사용자 의도로 보존 — 예: TSL3 -20)
-        if (cur === undefined || cur === null) {
-          next[s.ticker] = (DEFAULT_RATES[s.ticker] !== undefined) ? DEFAULT_RATES[s.ticker] : (DEFAULT_RATES._default || 20);
-          changed = true;
+        // 저장된 0/undefined/null 모두 누락으로 간주하여 DEFAULT_RATES 또는 _default(20%)로 복구
+        // (사용자가 명시적으로 0%로 설정한 경우는 거의 없고, 음수는 보존 — 예: TSL3 -20)
+        if (cur === undefined || cur === null || cur === 0) {
+          // DEFAULT_RATES에서 _default 키는 제외하고 ticker로 직접 매칭
+          let fallback;
+          if (DEFAULT_RATES[s.ticker] !== undefined && s.ticker !== "_default") {
+            fallback = DEFAULT_RATES[s.ticker];
+          } else {
+            fallback = DEFAULT_RATES._default || 20;
+          }
+          if (fallback !== cur) {
+            next[s.ticker] = fallback;
+            changed = true;
+          }
         }
       });
       return changed ? next : prev;
@@ -6948,7 +6957,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-09 scenario-rate-autofill-v1 */
+/* build:2026-05-09 scenario-rate-zero-fix-v2 */
 </script>
 </body>
 </html>
