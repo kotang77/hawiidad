@@ -1898,6 +1898,45 @@ function App() {
       ctx.fillText(p.year, xP(i), H - 8);
     });
   }, [simPoints, tab, goal, currency, rate]);
+  // ===== 수익금 자동 보정 (KRW→USD) =====
+  // 사진 OCR이 한국 증권사 화면(원화 매수금액)을 USD로 잘못 저장한 경우 자동 감지·보정
+  // 기준: 평단가(cost/shares)가 현재가의 30배 초과 → KRW로 입력된 것으로 판단 → rate로 나눔
+  const detectAbnormalCost = useCallback((stocks) => {
+    if (!Array.isArray(stocks) || !stocks.length) return [];
+    return stocks.filter(s => {
+      if (!s.shares || !s.costBasis) return false;
+      const costPerShare = s.costBasis / s.shares;
+      const liveP = livePrices[s.ticker] || s.price || 0;
+      if (liveP <= 0) return false;
+      // 평단가가 현재가의 30배 이상이면 KRW 가능성 높음 (보통 1300배 차이)
+      return costPerShare > liveP * 30;
+    });
+  }, [livePrices]);
+  const autoFixCostBasis = useCallback(() => {
+    const abnormal = detectAbnormalCost(portfolio);
+    if (abnormal.length === 0) {
+      window.alert("✅ 모든 종목의 매수원가가 정상 범위입니다 (보정 불필요).");
+      return;
+    }
+    const krwRate = rate || 1330;
+    const lines = abnormal.map(s => {
+      const oldPS = (s.costBasis / s.shares).toFixed(2);
+      const newCost = s.costBasis / krwRate;
+      const newPS = (newCost / s.shares).toFixed(2);
+      return `  ${s.ticker}: $${oldPS}/주 → $${newPS}/주 (총 $${Math.round(newCost).toLocaleString()})`;
+    }).join("\n");
+    const ok = window.confirm(
+      `⚠️ ${abnormal.length}개 종목의 매수원가가 비정상입니다 (KRW로 입력된 듯).\n\n` +
+      `현재 환율(${krwRate.toFixed(0)})로 USD 변환하시겠습니까?\n\n${lines}\n\n` +
+      `(이 작업은 되돌릴 수 없습니다. 실행 전 백업을 권장합니다.)`
+    );
+    if (!ok) return;
+    setPortfolio(prev => prev.map(s => {
+      if (!abnormal.find(a => a.ticker === s.ticker)) return s;
+      return { ...s, costBasis: s.costBasis / krwRate };
+    }));
+    setTimeout(() => window.alert("✅ " + abnormal.length + "개 종목의 매수원가를 보정했습니다."), 100);
+  }, [portfolio, livePrices, rate, detectAbnormalCost]);
   const handleAdd = () => {
     setAddError("");
     const ticker = newStock.ticker.toUpperCase().trim();
@@ -1977,13 +2016,22 @@ function App() {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 800,
         system: `이미지에서 주식 포트폴리오를 추출해 JSON 배열로만 반환하세요.
-형식: [{"ticker":"PLTR","name":"팔란티어","shares":3300,"costBasis":265756,"price":154.87,"sector":"AI 데이터"}]
+형식: [{"ticker":"PLTR","name":"팔란티어","shares":3300,"costBasis":265756,"price":154.87,"sector":"AI 데이터","currency":"USD"}]
+
+⚠️ 통화(currency) 정확히 판별 (가장 중요):
+- 화면에 "$" 표시 또는 가격이 한 자리/소수점 있으면 → "USD"
+- 화면에 "원" "₩" 표시 또는 가격이 큰 정수 (10,000 이상) → "KRW" (한국 증권사 화면)
+- 매수금액이 백만 단위 큰 숫자(예: 1,234,567)면 거의 확실히 "KRW"
+
+⚠️ costBasis는 해당 통화 그대로 (KRW면 KRW 그대로, 변환하지 말 것 — 클라이언트에서 변환함)
 - ticker: 영문 대문자 미국 티커
 - shares: 보유 수량 (숫자)
-- costBasis: 총 매수 원가 USD (숫자, 콤마 제거)
-- price: 현재가 USD (숫자)
+- costBasis: 총 매수 원가 (숫자, 콤마 제거, currency 단위 그대로)
+- price: 현재가 (숫자, currency 단위 그대로)
 - sector: 간단한 한글 업종 (추정 가능)
-JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 종목이 하나도 없으면 빈 배열 [].`,
+- currency: "USD" 또는 "KRW"
+
+JSON 배열 하나만, 마크다운/설명 금지. 종목 없으면 [].`,
         messages: [{
           role: "user",
           content: [
@@ -2010,17 +2058,26 @@ JSON 배열 하나만, 마크다운 코드블록/설명문 금지. 이미지에 
         return;
       }
       // 7) 포트폴리오 교체 (기존 동작 유지 — 증권사 스크린샷 초기 등록 가정)
+      // KRW로 표시된 종목 → 현재 환율로 USD 자동 변환
+      const krwRate = rate || 1330;
       let cleaned = parsed
         .filter(s => s && s.ticker)
-        .map((s, i) => ({
-          id: Date.now() + i,
-          ticker: String(s.ticker).toUpperCase().trim(),
-          name: (s.name || s.ticker || "").toString().trim(),
-          shares: Number(s.shares) || 0,
-          costBasis: Number(s.costBasis) || 0,
-          price: Number(s.price) || 0,
-          sector: (s.sector || "기타").toString().trim()
-        }))
+        .map((s, i) => {
+          const isKrw = (s.currency || "").toString().toUpperCase() === "KRW";
+          const rawCost = Number(s.costBasis) || 0;
+          const rawPrice = Number(s.price) || 0;
+          return {
+            id: Date.now() + i,
+            ticker: String(s.ticker).toUpperCase().trim(),
+            name: (s.name || s.ticker || "").toString().trim(),
+            shares: Number(s.shares) || 0,
+            // KRW로 인식된 경우 USD 환산
+            costBasis: isKrw ? rawCost / krwRate : rawCost,
+            price: isKrw ? rawPrice / krwRate : rawPrice,
+            sector: (s.sector || "기타").toString().trim(),
+            _ocrCurrency: s.currency || "USD"  // 디버깅용
+          };
+        })
         .filter(s => s.ticker && s.shares > 0);
       if (cleaned.length === 0) {
         setPhotoResult("⚠️ 추출된 종목의 필수값(티커/수량)이 부족합니다. 다른 화면으로 시도해주세요.");
@@ -4782,7 +4839,25 @@ JSON 배열만 반환 (마크다운 금지):
     style: {
       padding: "20px 20px 80px"
     }
-  }, tab === "portfolio" && /*#__PURE__*/React.createElement("div", null, portfolio.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, tab === "portfolio" && /*#__PURE__*/React.createElement("div", null,
+    // 수익 자동 보정 버튼 — 비정상 cost 감지된 경우에만 표시
+    portfolio.length > 0 && (() => {
+      const abnormal = detectAbnormalCost(portfolio);
+      if (abnormal.length === 0) return null;
+      return /*#__PURE__*/React.createElement("div", {
+        style: { background: "rgba(255,80,0,0.08)", border: "1px solid rgba(255,80,0,0.3)", borderRadius: 10, padding: "10px 12px", margin: "0 14px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }
+      },
+        /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: R, fontWeight: 700, marginBottom: 2 } }, "⚠️ 매수원가 비정상 감지 (" + abnormal.length + "개 종목)"),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#888", lineHeight: 1.4 } }, "원화로 입력된 듯 — 클릭해서 USD로 자동 변환")
+        ),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: autoFixCostBasis,
+          style: { background: R, color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }
+        }, "💰 자동 보정")
+      );
+    })(),
+    portfolio.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "60px 0",
@@ -6843,7 +6918,7 @@ JSON 배열만 반환 (마크다운 금지):
       `));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-/* build:2026-05-08 philosophy-v5-recovery */
+/* build:2026-05-08 cost-basis-autofix-v1 */
 </script>
 </body>
 </html>
