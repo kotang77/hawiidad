@@ -19,7 +19,24 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="부의확신">
 <style>html,body{background:#faf6ec;overscroll-behavior-y:contain;}
-@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }</style>
+@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }
+/* ===== Full-screen splash overlay — icon-512.png 화면 가득 채워 표시 (2026-05-16) ===== */
+#app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #faf6ec url("./icon-512.png?v=9") center/contain no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: appSplashFade 1.8s ease-in-out forwards;
+}
+@keyframes appSplashFade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+</style>
 <script>
   // ── 안전 로깅 헬퍼 (일부 웹뷰에서 console.info 미정의) ──
   var __log = (function(){
@@ -490,6 +507,7 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
 </style>
 </head>
 <body>
+<div id="app-splash" aria-hidden="true"></div>
 <div id="root"></div>
 <div id="err"></div>
 <script>
@@ -505,6 +523,11 @@ window.addEventListener('error', function(e){
 window.addEventListener('unhandledrejection', function(e){
   window.__showErr('Promise rejection: '+(e.reason&&e.reason.message||e.reason));
 });
+setTimeout(function(){
+  // 스플래시 오버레이 제거 (애니메이션 완료 시점)
+  var sp = document.getElementById('app-splash');
+  if (sp && sp.parentNode) sp.parentNode.removeChild(sp);
+},1900);
 setTimeout(function(){
   if(typeof React==='undefined'||typeof ReactDOM==='undefined'){
     var miss=[];
@@ -1793,7 +1816,11 @@ function App() {
       return changed ? next : prev;
     });
   }, [portfolio]);
-  const getPrice = useCallback(s => livePrices[s.ticker] ?? s.price, [livePrices]);
+  // 실시간 가격 우선 사용. livePrices가 0/NaN이면 초기 가격으로 폴백
+  const getPrice = useCallback(s => {
+    const live = livePrices[s.ticker];
+    return (typeof live === "number" && live > 0) ? live : (Number(s.price) > 0 ? Number(s.price) : 0);
+  }, [livePrices]);
   const rate = manualRate || usdKrw;
   // 통화 토글에 따라 USD 또는 원화로 표기 (rate 없으면 USD로 fallback)
   const fmtCur = useCallback((usd) => {
@@ -1813,13 +1840,17 @@ function App() {
   useEffect(() => {
     setSimPoints(calcScenario(stockRates, portfolio, livePrices, goal));
   }, [stockRates, livePrices, portfolio, goal]);
-  // Hot path: 포트폴리오 합계 메모이제이션 — for-of 단일 루프
+  // Hot path: 포트폴리오 합계 메모이제이션 — 실시간 가격 정확 반영
   const { totalValue, totalCost } = React.useMemo(() => {
     let tv = 0, tc = 0;
     if (Array.isArray(portfolio)) {
       for (const x of portfolio) {
-        tv += (livePrices[x.ticker] != null ? livePrices[x.ticker] : x.price) * x.shares;
-        tc += x.costBasis;
+        const live = livePrices[x.ticker];
+        const p = (typeof live === "number" && live > 0) ? live : (Number(x.price) > 0 ? Number(x.price) : 0);
+        const sh = Number(x.shares) || 0;
+        const cb = Number(x.costBasis) || 0;
+        tv += p * sh;
+        tc += cb;
       }
     }
     return { totalValue: tv, totalCost: tc };
@@ -4942,17 +4973,20 @@ JSON 배열만 반환 (마크다운 금지):
       fontSize: 13
     }
   }, "\uC544\uB798 \uBC84\uD2BC\uC73C\uB85C \uCD94\uAC00\uD558\uC138\uC694")) : [...portfolio].sort((a, b) => {
-    // 투자금액(평가액) 많은 순 정렬 — 실시간 현재가 기준
-    const vA = (livePrices[a.ticker] ?? a.price) * a.shares;
-    const vB = (livePrices[b.ticker] ?? b.price) * b.shares;
-    return vB - vA;
+    // 투자금액(평가액) 많은 순 정렬 — 실시간 현재가 기준 (0/NaN 방어)
+    const pa = getPrice(a), pb = getPrice(b);
+    return (pb * (Number(b.shares) || 0)) - (pa * (Number(a.shares) || 0));
   }).map(stock => {
+    // 실시간 수익률 계산: P&L $ = 현재가 × 수량 - 매수원가
+    //                  P&L % = P&L $ / 매수원가 × 100
     const lp = getPrice(stock);
     const chg = liveChanges[stock.ticker];
     const dayChg = chg?.change ?? null;
-    const val = lp * stock.shares;
-    const pnl = val - stock.costBasis;
-    const pnlPct = pnl / stock.costBasis * 100;
+    const sh = Number(stock.shares) || 0;
+    const cb = Number(stock.costBasis) || 0;
+    const val = lp * sh;
+    const pnl = val - cb;
+    const pnlPct = cb > 0 ? (pnl / cb * 100) : 0;
     const weight = totalValue > 0 ? val / totalValue * 100 : 0;
     const sig = sigStyle(stock.ticker === "TSL3" ? "즉시매도" : pnlPct > 80 ? "강력매수" : pnlPct > 30 ? "매수" : pnlPct > 0 ? "보유" : "매도검토");
     const expanded = expandedStock === stock.id;
