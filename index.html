@@ -483,6 +483,10 @@ function(a,b,c){if(!Vd(b))throw Error(n(200));return Wd(null,a,b,!1,c)};Q.unmoun
   [style*="font-size: 10px"] { font-size: 9px !important; }
 }
 
+  20%  { opacity: 1; transform: scale(1); }
+  80%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
 </style>
 </head>
 <body>
@@ -519,8 +523,7 @@ const {
   useState,
   useEffect,
   useRef,
-  useCallback,
-  useMemo
+  useCallback
 } = React;
 // hide loading once React boots
 (function () {
@@ -1712,15 +1715,11 @@ function App() {
   }, []);
   const [priceSource, setPriceSource] = useState("연결 중...");
   const [priceError, setPriceError] = useState(false);
-  // ===== 가격 폴링 안정화 =====
-  // 기존: deps=[portfolio, zeroStocks] → 보유주식 인라인 편집 시 매 키 입력마다
-  //       interval 재생성 + 즉시 fetchAll() → API 폭주 + 배터리 낭비
-  // 개선: 티커 목록(symKey)이 바뀔 때만 interval 재시작.
-  //       종목 수량/매수금액 편집은 fetch를 트리거하지 않음.
-  //       폴링 주기 15s → 60s (4× API 호출 감소, 무료티어 친화)
-  const tickerListSig = useMemo(() => {
-    const pf = Array.isArray(portfolio) ? portfolio.map(s => s?.ticker).filter(Boolean) : [];
-    const zs = Array.isArray(zeroStocks) ? zeroStocks.map(s => s?.ticker).filter(Boolean) : [];
+  // 가격 폴링 안정화: 티커 목록 변경 시에만 interval 재시작 (수량 편집은 fetch 안 함)
+  // 폴링 주기 15s → 60s (4× API 호출 감소)
+  const tickerListSig = React.useMemo(() => {
+    const pf = Array.isArray(portfolio) ? portfolio.map(s => s && s.ticker).filter(Boolean) : [];
+    const zs = Array.isArray(zeroStocks) ? zeroStocks.map(s => s && s.ticker).filter(Boolean) : [];
     return [...new Set([...pf, ...zs])].sort().join(",");
   }, [portfolio, zeroStocks]);
   useEffect(() => {
@@ -1748,10 +1747,7 @@ function App() {
     };
     fetchAll();
     const t = setInterval(fetchAll, 60000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
+    return () => { cancelled = true; clearInterval(t); };
   }, [tickerListSig]);
   // 포트폴리오 변경 시 localStorage에 자동 저장 (모바일 리로드 대비)
   useEffect(() => {
@@ -1817,13 +1813,14 @@ function App() {
   useEffect(() => {
     setSimPoints(calcScenario(stockRates, portfolio, livePrices, goal));
   }, [stockRates, livePrices, portfolio, goal]);
-  // ===== Hot path: 포트폴리오 합계 메모이제이션 =====
-  // 매 렌더마다 reduce 5회 돌던 것을 portfolio/livePrices 변경 시에만 재계산
+  // Hot path: 포트폴리오 합계 메모이제이션 — for-of 단일 루프
   const { totalValue, totalCost } = React.useMemo(() => {
     let tv = 0, tc = 0;
-    for (const x of portfolio) {
-      tv += (livePrices[x.ticker] ?? x.price) * x.shares;
-      tc += x.costBasis;
+    if (Array.isArray(portfolio)) {
+      for (const x of portfolio) {
+        tv += (livePrices[x.ticker] != null ? livePrices[x.ticker] : x.price) * x.shares;
+        tc += x.costBasis;
+      }
     }
     return { totalValue: tv, totalCost: tc };
   }, [portfolio, livePrices]);
@@ -2392,7 +2389,7 @@ ${newsCtx || "-"}
         syncNewsToPortfolio(portfolio).catch(() => {});
       }
     }
-  }, [tab, portfolio, zeroStocks, zeroLoading]);
+  }, [tab, portfolio, zeroStocks.length]);
   // 100억 뉴스 탭 진입 시: 이번 주 추천이 없거나 지난 주 것이면 자동 갱신
   useEffect(() => {
     if (tab !== "zero") return;
@@ -2400,7 +2397,7 @@ ${newsCtx || "-"}
     if ((!weeklyPick || weeklyPick.weekKey !== cur) && !weeklyPickLoading && getApiKey()) {
       fetchWeeklyPick(false);
     }
-  }, [tab, weeklyPick, weeklyPickLoading]);
+  }, [tab]);
   // ===== 목표 달성 전략 (비중조정 + 신규매수) — Claude 호출 =====
   const fetchGoalStrategy = useCallback(async (opts = {}) => {
     setGoalStratLoading(true);
@@ -2562,7 +2559,7 @@ ${newsCtx || "-"}
         syncNewsToPortfolio(portfolio).catch(() => {});
       }
     }
-  }, [tab, portfolio, goalStrategy, goalStratLoading, fetchGoalStrategy]);
+  }, [tab, portfolio]);
   // 월가 리서치 핵심 섹터 4개 (AI/우주/블록체인/양자) — 텐배거 발굴 영역
   const SECTORS = [{
     id: "ai",
@@ -2944,43 +2941,6 @@ ${sector.name} 섹터에 대해 최근 30일 핫뉴스를 종합해 정식 리�
     icon: "📝",
     label: "투자노트"
   }];
-  // ===== 스와이프 탭 네비게이션 =====
-  // 모바일에서 콘텐츠 영역을 좌우로 밀면 탭 전환
-  //   우→좌(dx<0): 다음 탭, 좌→우(dx>0): 이전 탭
-  //   세로 우세 또는 너무 느린 동작은 무시 (스크롤·탭과 충돌 방지)
-  //   입력/슬라이더/스크롤 가능한 영역 위에서 시작하면 비활성
-  const touchStartRef = useRef(null);
-  const onContentTouchStart = (e) => {
-    const tch = e.touches && e.touches[0];
-    if (!tch) return;
-    // 슬라이더/숫자입력/텍스트입력/textarea 위에서 시작하면 무시
-    const tgt = e.target;
-    if (tgt && tgt.closest && tgt.closest(
-      'input[type="range"], input[type="number"], input[type="text"], input[type="email"], input[type="password"], input[type="file"], textarea, [data-no-swipe]'
-    )) {
-      touchStartRef.current = null;
-      return;
-    }
-    touchStartRef.current = { x: tch.clientX, y: tch.clientY, t: Date.now() };
-  };
-  const onContentTouchEnd = (e) => {
-    const start = touchStartRef.current;
-    touchStartRef.current = null;
-    if (!start) return;
-    const tch = e.changedTouches && e.changedTouches[0];
-    if (!tch) return;
-    const dx = tch.clientX - start.x;
-    const dy = tch.clientY - start.y;
-    const dt = Date.now() - start.t;
-    // 임계값: 가로 60px↑, 세로 < 가로*0.5, 800ms 이내
-    if (Math.abs(dx) < 60) return;
-    if (Math.abs(dy) > Math.abs(dx) * 0.5) return;
-    if (dt > 800) return;
-    const idx = TABS.findIndex(x => x.id === tab);
-    if (idx < 0) return;
-    if (dx < 0 && idx < TABS.length - 1) setTab(TABS[idx + 1].id);
-    else if (dx > 0 && idx > 0) setTab(TABS[idx - 1].id);
-  };
   const NOTE_TYPES = ["매매일지", "시나리오", "관심", "기타"];
   // 투자노트 저장
   const saveNote = () => {
@@ -4314,15 +4274,11 @@ JSON 배열만 반환 (마크다운 금지):
   }, "\uBCF4\uC720 \uC885\uBAA9"), portfolio.map(s => /*#__PURE__*/React.createElement("div", {
     key: s.id,
     style: {
-      padding: "12px 0",
-      borderBottom: "1px solid #1a1a1a"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      marginBottom: 8
+      padding: "12px 0",
+      borderBottom: "1px solid #1a1a1a"
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -4335,7 +4291,7 @@ JSON 배열만 반환 (마크다운 금지):
       color: "#666",
       marginLeft: 8
     }
-  }, s.name)), /*#__PURE__*/React.createElement("button", {
+  }, s.name, " \xB7 ", Number(s.shares).toLocaleString(), "\uC8FC")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setPortfolio(p => p.filter(x => x.id !== s.id)),
     style: {
       background: "rgba(255,80,0,0.1)",
@@ -4348,58 +4304,7 @@ JSON 배열만 반환 (마크다운 금지):
       fontFamily: "inherit",
       fontWeight: 600
     }
-  }, "\uC0AD\uC81C")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr",
-      gap: 8
-    }
-  }, [{
-    label: "\uC218\uB7C9",
-    key: "shares",
-    val: s.shares,
-    step: "1"
-  }, {
-    label: "\uB9E4\uC218\uAE08\uC561($)",
-    key: "costBasis",
-    val: s.costBasis,
-    step: "0.01"
-  }, {
-    label: "\uD604\uC7AC\uAC00($)",
-    key: "price",
-    val: s.price,
-    step: "0.01"
-  }].map(f => /*#__PURE__*/React.createElement("div", {
-    key: f.key
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: "#555",
-      marginBottom: 3
-    }
-  }, f.label), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    step: f.step,
-    value: f.val ?? "",
-    onChange: e => {
-      const v = e.target.value === "" ? 0 : Number(e.target.value);
-      setPortfolio(p => p.map(x => x.id === s.id ? { ...x, [f.key]: v } : x));
-    },
-    style: {
-      width: "100%",
-      background: "#111",
-      border: "1px solid #222",
-      borderRadius: 8,
-      color: "#fff",
-      fontSize: 13,
-      fontWeight: 600,
-      padding: "7px 9px",
-      fontFamily: "inherit",
-      outline: "none",
-      boxSizing: "border-box",
-      textAlign: "right"
-    }
-  }))))), portfolio.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, "\uC0AD\uC81C"))), portfolio.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "20px 0",
@@ -4949,11 +4854,8 @@ JSON 배열만 반환 (마크다운 금지):
       fontSize: 16
     }
   }, t.icon), /*#__PURE__*/React.createElement("span", null, t.label)))), /*#__PURE__*/React.createElement("div", {
-    onTouchStart: onContentTouchStart,
-    onTouchEnd: onContentTouchEnd,
     style: {
-      padding: "20px 20px 80px",
-      touchAction: "pan-y"
+      padding: "20px 20px 80px"
     }
   }, tab === "portfolio" && /*#__PURE__*/React.createElement("div", null,
     // 수익 자동 보정 버튼 — 비정상 cost 감지된 경우에만 표시
@@ -5334,52 +5236,22 @@ JSON 배열만 반환 (마크다운 금지):
   }, [{
     l: "보수적",
     r: {
-      PLTR: 30,
-      NVDA: 20,
-      TSLA: 10,
-      POET: 10,
-      CRCL: 15,
-      IONQ: 20,
-      TSL3: -30,
-      KOPN: 15,
-      RKLB: 20,
-      IREN: 12,
-      SPIR: 15,
-      DXYZ: 10
+      PLTR: 30, NVDA: 20, TSLA: 10, POET: 10, CRCL: 15, IONQ: 20, TSL3: -30,
+      KOPN: 15, RKLB: 20, IREN: 12, SPIR: 15, DXYZ: 10
     },
     color: "#00b4d8"
   }, {
     l: "중립",
     r: {
-      PLTR: 50,
-      NVDA: 30,
-      TSLA: 15,
-      POET: 20,
-      CRCL: 20,
-      IONQ: 25,
-      TSL3: -20,
-      KOPN: 35,
-      RKLB: 40,
-      IREN: 30,
-      SPIR: 35,
-      DXYZ: 25
+      PLTR: 50, NVDA: 30, TSLA: 15, POET: 20, CRCL: 20, IONQ: 25, TSL3: -20,
+      KOPN: 35, RKLB: 40, IREN: 30, SPIR: 35, DXYZ: 25
     },
     color: G
   }, {
     l: "낙관적",
     r: {
-      PLTR: 80,
-      NVDA: 50,
-      TSLA: 30,
-      POET: 50,
-      CRCL: 40,
-      IONQ: 60,
-      TSL3: -10,
-      KOPN: 70,
-      RKLB: 80,
-      IREN: 65,
-      SPIR: 75,
-      DXYZ: 55
+      PLTR: 80, NVDA: 50, TSLA: 30, POET: 50, CRCL: 40, IONQ: 60, TSL3: -10,
+      KOPN: 70, RKLB: 80, IREN: 65, SPIR: 75, DXYZ: 55
     },
     color: "#ffd60a"
   }].map(p => {
@@ -5387,8 +5259,7 @@ JSON 배열만 반환 (마크다운 금지):
     return /*#__PURE__*/React.createElement("button", {
       key: p.l,
       onClick: () => {
-        // 기존 stockRates를 보존하면서 프리셋 값을 덮어쓰기 (포트폴리오에 있지만
-        // 프리셋에 없는 신규 종목은 기존 비율 유지 → 시나리오 0% 표시 방지)
+        // 신규 종목 0% 표시 방지 — 기존 stockRates 보존하면서 프리셋 덮어쓰기
         setStockRates(prev => ({ ...prev, ...p.r }));
         setActivePreset(p.l);
       },
@@ -6990,4 +6861,68 @@ JSON 배열만 반환 (마크다운 금지):
               style: { background: "#0a0a0a", borderRadius: 10, padding: "9px 8px", textAlign: "center" }
             },
               /*#__PURE__*/React.createElement("div", {
-                style: { fontSize: 10, color: "#555", margi
+                style: { fontSize: 10, color: "#555", marginBottom: 3, letterSpacing: 0.5 }
+              }, m.label),
+              /*#__PURE__*/React.createElement("div", {
+                style: { fontSize: 14, fontWeight: 700, color: m.color }
+              }, m.val)
+            ))
+          ),
+          wp.synergy && /*#__PURE__*/React.createElement("div", {
+            style: { background: "#0a0a0a", borderRadius: 10, padding: "10px 12px", marginBottom: 8, borderLeft: `2px solid ${G}` }
+          },
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 10, color: G, fontWeight: 700, marginBottom: 4, letterSpacing: 1 }
+            }, "🔗 보유 종목 연관성"),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 12, color: "#ccc", lineHeight: 1.6 }
+            }, wp.synergy)
+          ),
+          wp.moat && /*#__PURE__*/React.createElement("div", {
+            style: { background: "#0a0a0a", borderRadius: 10, padding: "10px 12px", marginBottom: 8, borderLeft: `2px solid ${wpMoatColor}` }
+          },
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 10, color: wpMoatColor, fontWeight: 700, marginBottom: 4, letterSpacing: 1 }
+            }, "제로투원 해자"),
+            /*#__PURE__*/React.createElement("div", {
+              style: { fontSize: 12, color: "#ccc", lineHeight: 1.6 }
+            }, wp.moat)
+          ),
+          wp.why && /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 12, color: "#999", lineHeight: 1.65, marginBottom: 8 }
+          }, wp.why),
+          wp.verdict && /*#__PURE__*/React.createElement("div", {
+            style: { background: "rgba(0,200,5,0.06)", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 12, color: G, fontWeight: 600 }
+          }, "💡 ", wp.verdict),
+          wp.risk && /*#__PURE__*/React.createElement("div", {
+            style: { display: "flex", gap: 6, alignItems: "flex-start", marginBottom: 8 }
+          },
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 9, background: "rgba(255,80,0,0.15)", color: R, borderRadius: 5, padding: "2px 7px", fontWeight: 700, marginTop: 2, whiteSpace: "nowrap" }
+            }, "리스크"),
+            /*#__PURE__*/React.createElement("span", {
+              style: { fontSize: 11, color: "#666", lineHeight: 1.55 }
+            }, wp.risk)
+          ),
+          /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 10, color: "#444", marginTop: 6, textAlign: "right" }
+          }, wp.weekKey || "—", " · ", wp.generatedAt ? new Date(wp.generatedAt).toLocaleDateString("ko-KR") : "—")
+        )
+      )
+    );
+  })()), /*#__PURE__*/React.createElement("style", null, `
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+        @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+        input::placeholder{color:#333;}
+        input[type=range]{height:4px;border-radius:2px;}
+        ::-webkit-scrollbar{width:0;}
+      `));
+}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+/* build:2026-05-09 scenario-rate-zero-fix-v2 */
+</script>
+</body>
+</html>
